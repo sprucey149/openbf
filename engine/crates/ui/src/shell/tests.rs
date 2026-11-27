@@ -411,7 +411,7 @@ fn the_states_and_their_presses() {
     assert_eq!(COMMANDS[m.command], Cmd::Launch);
     assert_eq!(m.playlist.len(), 1);
     assert_eq!(m.play_rows()[1].text, "Hoth (bf2)");
-    assert_eq!(m.play_rows()[1].icon, Some("mode_icon_con"));
+    assert_eq!(m.play_rows()[1].icon.as_deref(), Some("mode_icon_con"));
     assert_eq!(m.play_rows()[1].icon2, Some("imp_icon"));
     // REMOVE -> the playlist on "Remove All" (info empty), Down, Cross
     // deletes Hoth; with only Remove All left the focus is ADD.
@@ -1164,9 +1164,9 @@ fn hunt_queues_the_native_matchup_from_the_selected_map() {
             .position(|map| map.game == game && map.key.ends_with("_end1"))
             .unwrap();
         let map = &shell.maps[index];
-        assert!(map.runnable(Mode::Hunt, side));
-        assert!(!map.runnable(Mode::Hunt, Side::Era(Era::Cw)));
-        shell.add(MapPick::One(index), mode, SidePick::One(side));
+        assert!(map.runnable(&Mode::Hunt, side));
+        assert!(!map.runnable(&Mode::Hunt, Side::Era(Era::Cw)));
+        shell.add(MapPick::One(index), mode.clone(), SidePick::One(side));
     }
     shell.focus_command(Cmd::Launch);
     let Some(IaCommand::Launch(playlist)) = shell.step(cross(), 0.0) else {
@@ -1271,12 +1271,12 @@ fn hero_assault_needs_a_mission_and_a_single_era() {
     let list = catalog(&text, &bakes, &without_coruscant);
     let map = |list: &[MapEntry], key: &str| list.iter().find(|m| m.key == key).unwrap().clone();
     let tat2 = map(&list, "tat2");
-    assert!(tat2.runnable(Mode::Eli, Side::Era(Era::Gcw)));
-    assert!(!tat2.runnable(Mode::Eli, Side::Era(Era::Cw)));
-    assert!(!tat2.runnable(Mode::Eli, Side::Mixed(0)));
-    assert!(!map(&list, "bf2_cor1").runnable(Mode::Eli, Side::Era(Era::Gcw)));
+    assert!(tat2.runnable(&Mode::Eli, Side::Era(Era::Gcw)));
+    assert!(!tat2.runnable(&Mode::Eli, Side::Era(Era::Cw)));
+    assert!(!tat2.runnable(&Mode::Eli, Side::Mixed(0)));
+    assert!(!map(&list, "bf2_cor1").runnable(&Mode::Eli, Side::Era(Era::Gcw)));
     let list = catalog(&text, &bakes, &with_coruscant);
-    assert!(map(&list, "bf2_cor1").runnable(Mode::Eli, Side::Era(Era::Gcw)));
+    assert!(map(&list, "bf2_cor1").runnable(&Mode::Eli, Side::Era(Era::Gcw)));
 }
 
 /// Issue #172 (playtest): the Assault AI Units row's help is openbf's own,
@@ -1393,7 +1393,7 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
     let abr2 = list.iter().find(|m| m.key == "mod_abr_v2__abr").unwrap();
     assert_ne!(abr1.label, abr2.label);
     assert!(abr1.label.contains("(mod)"));
-    assert!(abr1.runnable(Mode::Ctf, Side::Era(Era::Gcw)));
-    assert!(abr1.runnable(Mode::Ctf, Side::Era(Era::Cw)));
-    assert!(abr1.runnable(Mode::Con, Side::Mixed(0)));
+    assert!(abr1.runnable(&Mode::Ctf, Side::Era(Era::Gcw)));
+    assert!(abr1.runnable(&Mode::Ctf, Side::Era(Era::Cw)));
+    assert!(abr1.runnable(&Mode::Con, Side::Mixed(0)));
 }

@@ -40,6 +40,7 @@ pub mod cloth;
 pub mod combo;
 pub mod fpm;
 pub mod hud;
+pub mod script_ir;
 pub mod shell;
 pub mod world_anim;
 pub mod world_events;

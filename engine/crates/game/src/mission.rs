@@ -313,12 +313,29 @@ pub struct MissionDef {
     /// Singleplayer campaign objectives, movies, and mid-round mutations (`mode == "campaign"`).
     #[serde(default)]
     pub campaign: Option<CampaignMissionDef>,
+    /// `SetClassProperty(class, prop, val)` calls folded from `ScriptInit` (mod missions).
+    #[serde(default)]
+    pub class_properties: Vec<(String, String, String)>,
+    /// Translated mission action-tree IR for scripted mod / custom modes.
+    #[serde(default)]
+    pub script: Option<manifest::script_ir::ScriptDef>,
+    /// Mod-local `ScriptCB_DoFile` libraries `(lower_name, ron_filename)` under `missions/`.
+    #[serde(default)]
+    pub script_libs: Vec<(String, String)>,
+    /// Loaded `ScriptCB_DoFile` libraries for [`Self::script`] (mod-local + stock fallback).
+    #[serde(skip)]
+    pub loaded_script_libs: Vec<(String, std::sync::Arc<manifest::script_ir::ScriptDef>)>,
     /// The PC .lua and PS2 script this record was read out of.
     #[serde(default)]
     pub source: String,
 }
 
 impl MissionDef {
+    /// Whether this mission runs an action-tree script (campaign or scripted mod mode).
+    pub fn has_script(&self) -> bool {
+        self.is_campaign() || self.script.is_some()
+    }
+
     /// Whether the player can choose teams (`Side` stage) on the spawn screen.
     pub fn allows_side_select(&self) -> bool {
         self.allow_side_select.unwrap_or(!self.is_campaign())
@@ -623,13 +640,37 @@ impl MissionDef {
             .with_context(|| format!("parse {}", path.display()))?;
         if let Some(c) = m.campaign.as_mut() {
             c.libs = load_campaign_libs(&path.parent().unwrap_or(Path::new(".")).join("lib"))?;
+        } else if m.script.is_some() {
+            let parent = path.parent().unwrap_or(Path::new("."));
+            let mut libs: Vec<(String, std::sync::Arc<manifest::script_ir::ScriptDef>)> =
+                Vec::new();
+            for (logical, ron_name) in &m.script_libs {
+                let lib_path = parent.join(ron_name);
+                if let Ok(lib_txt) = pak::read_to_string(&lib_path) {
+                    if let Ok(def) = ron::Options::default()
+                        .without_recursion_limit()
+                        .from_str::<manifest::script_ir::ScriptDef>(&lib_txt)
+                    {
+                        libs.push((logical.to_ascii_lowercase(), std::sync::Arc::new(def)));
+                    }
+                }
+            }
+            // Fallback to stock campaign shared libraries (`ObjectiveConquest`, `setup_teams`, etc.).
+            if let Ok(stock) = load_campaign_libs(&parent.join("campaign").join("lib")) {
+                for (name, def) in stock {
+                    if !libs.iter().any(|(n, _)| n.eq_ignore_ascii_case(&name)) {
+                        libs.push((name, def));
+                    }
+                }
+            }
+            m.loaded_script_libs = libs;
         }
         if m.teams.len() != 2 {
             anyhow::bail!("{}: v0 missions need exactly two teams", path.display());
         }
         // A team with no reinforcements can never spawn anyone in normal skirmish
-        // modes; campaign scripts author `-1` (unlimited) on defender/AI pools.
-        if !m.is_campaign() {
+        // modes; campaign and scripted mod missions may author `-1` (unlimited) or set tickets in script.
+        if !m.has_script() {
             if let Some(t) = m.teams.iter().find(|t| t.tickets == 0) {
                 anyhow::bail!(
                     "{}: team '{}' has 0 reinforcements — a round with no tickets \

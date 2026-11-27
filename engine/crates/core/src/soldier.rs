@@ -173,6 +173,12 @@ pub struct SoldierConstants {
     /// `stand_deadhero` on the ground, state 9 `Thrown` when killed airborne
     /// or rolling) and skips corpse ground slide (`FUN_00240bf8` case 0x10).
     pub flee_like_a_hero: bool,
+    /// `MaxShield` from ODF or `SetClassProperty`: ordinary soldier shield pool (0 = unshielded).
+    pub max_shield: f32,
+    /// `AddShield` from ODF or `SetClassProperty`: soldier shield regen/drain per second.
+    pub add_shield: f32,
+    /// `AddHealth` from ODF or `SetClassProperty`: soldier health regen/drain per second.
+    pub add_health: f32,
 }
 
 impl Default for SoldierConstants {
@@ -227,6 +233,9 @@ impl Default for SoldierConstants {
             hero_cameras: [None; 7],
             saber: false,
             flee_like_a_hero: false,
+            max_shield: 0.0,
+            add_shield: 0.0,
+            add_health: 0.0,
         }
     }
 }
@@ -258,6 +267,9 @@ impl SoldierConstants {
         set("MaxStrafeSpeed", &mut c.max_strafe_speed);
         set("MaxTurnSpeed", &mut c.max_turn_speed);
         set("CollisionRootScale", &mut c.collision_scale);
+        set("MaxShield", &mut c.max_shield);
+        set("AddShield", &mut c.add_shield);
+        set("AddHealth", &mut c.add_health);
         let root_scale = src
             .prop_hash_all(crate::flash::fnv_lower("SkeletonRootScale"))
             .last()

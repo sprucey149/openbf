@@ -141,6 +141,7 @@ impl World {
                 let nodes = &self.paths.get(*p as usize)?.1;
                 nodes.get(*i as usize).or(nodes.last()).copied()
             }
+            Value::Ud(Ud::Matrix(i)) => self.matrices.get(*i as usize).copied(),
             Value::Str(s) => {
                 if let Some(p) = self.path(s) {
                     return self.paths[p].1.first().copied();

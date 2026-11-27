@@ -1419,6 +1419,8 @@ mod tests {
             unsupported: Vec::new(),
             catalog_digest: String::new(),
             target_choices: BTreeMap::new(),
+            custom_modes: BTreeMap::new(),
+            has_shell_icons: false,
         };
         meta.save_atomic(&cache).unwrap();
         let status = converted_status(&cache, "fp", "", bake);

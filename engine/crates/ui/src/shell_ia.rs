@@ -612,7 +612,7 @@ impl Ctx<'_> {
                 let m = row_h * (1.0 - CURSOR_H) * 0.5;
                 self.cursor_box(s, [x0, y + m, x1, y + row_h - m]);
             }
-            let icons = match (row.icon, row.icon2) {
+            let icons = match (row.icon.as_deref(), row.icon2) {
                 (Some(_), Some(_)) => ICON_IN + 2.0 * icon + ICON_GAP,
                 (Some(_), None) => ICON_IN + icon,
                 _ => 0.0,
@@ -632,7 +632,7 @@ impl Ctx<'_> {
                 self.text(s, &LIST, line, at, HAlign::Left, style);
             }
             let iy = y + (row_h - icon) * 0.5;
-            if let Some(tex) = row.icon {
+            if let Some(tex) = row.icon.as_deref() {
                 let ix = x1 - ICON_IN - icon;
                 // Grey 128 under the row's colour (f2 pc 57; the frames'
                 // icons are half the text's brightness [M]).

@@ -12,6 +12,24 @@ impl Ctx<'_> {
                 .char_of(arg(a, 0))
                 .and_then(|c| w.char_unit(sim, c))
                 .map_or(Value::Nil, |h| Value::Ud(Ud::Unit(h.index, h.gen)))),
+            "GetCharacterVehicle" => one(w
+                .char_of(arg(a, 0))
+                .and_then(|c| w.char_unit(sim, c))
+                .and_then(|h| sim.unit(h))
+                .and_then(|u| u.mount)
+                .map_or(Value::Nil, |m| {
+                    Value::Ud(Ud::Vehicle(m.vehicle.index, m.vehicle.gen))
+                })),
+            "ExitVehicle" => {
+                if let Some(h) = w.char_of(arg(a, 0)).and_then(|c| w.char_unit(sim, c)) {
+                    if let Some(u) = sim.units.get(h.index as usize) {
+                        if u.alive && u.mount.is_some() {
+                            sim.exit_vehicle(h);
+                        }
+                    }
+                }
+                nothing()
+            }
             "GetCharacterTeam" => one(w
                 .char_of(arg(a, 0))
                 .and_then(|c| w.char_team(sim, c))
@@ -106,23 +124,60 @@ impl Ctx<'_> {
                 nothing()
             }
 
-            "GetObjectPtr" => one(arg(a, 0)
+            "GetObjectPtr" | "GetEntityPtr" => one(arg(a, 0)
                 .as_str()
                 .and_then(|n| w.resolve_name(sim, n))
                 .map_or(Value::Nil, Value::Ud)),
-            "GetEntityName" => one(w
+            "GetEntityName" | "GetEntityname" => one(w
                 .resolve(sim, arg(a, 0))
                 .map_or(Value::Nil, |o| Value::str(&w.obj_name(sim, o)))),
             "GetEntityClass" => {
                 let c = w.resolve(sim, arg(a, 0)).and_then(|o| w.obj_class(sim, o));
                 one(c.map_or(Value::Nil, |c| Value::Ud(Ud::Class(w.class_id(&c)))))
             }
-            "GetEntityClassPtr" => one(arg(a, 0)
+            "GetEntityClassPtr" | "FindEntityClass" => one(arg(a, 0)
                 .as_str()
                 .map_or(Value::Nil, |c| Value::Ud(Ud::Class(w.class_id(c))))),
-            "GetObjectTeam" => one(Value::Num(
+            "GetObjectTeam" | "GetCommandPostTeam" => one(Value::Num(
                 w.resolve(sim, arg(a, 0)).map_or(0, |o| w.obj_team(sim, o)) as f32,
             )),
+            "GetEntityMatrix" => {
+                let pos = w.resolve(sim, arg(a, 0)).and_then(|o| w.obj_pos(sim, o));
+                one(pos.map_or(Value::Nil, |p| {
+                    let idx = w.matrices.len() as u32;
+                    w.matrices.push((p, 0.0));
+                    Value::Ud(Ud::Matrix(idx))
+                }))
+            }
+            "SetEntityMatrix" => {
+                if let (Some(obj), Some((pos, yaw))) =
+                    (w.resolve(sim, arg(a, 0)), w.point_of(sim, arg(a, 1)))
+                {
+                    match obj {
+                        Ud::Unit(i, gen) => {
+                            if let Some(u) = sim.unit_mut(core::unit::UnitHandle { index: i, gen })
+                            {
+                                u.soldier.pos = pos;
+                                u.soldier.yaw = yaw;
+                            }
+                        }
+                        Ud::Vehicle(i, gen) => {
+                            if let Some(v) =
+                                sim.vehicle_mut(core::vehicle::VehicleHandle { index: i, gen })
+                            {
+                                v.pos = pos;
+                            }
+                        }
+                        Ud::Entity(ei) => {
+                            if let Some(ent) = w.entities.get_mut(ei as usize) {
+                                ent.2 = pos;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                nothing()
+            }
             "SetObjectTeam" => {
                 let t = arg(a, 1).clone();
                 w.set_property(sim, arg(a, 0), "team", &text(&t));
@@ -159,6 +214,20 @@ impl Ctx<'_> {
                 let key = text(arg(a, 1));
                 let val = text(arg(a, 2));
                 w.set_property(sim, arg(a, 0), &key, &val);
+                nothing()
+            }
+            "SetClassProperty" => {
+                if let Some(cls) = arg(a, 0).as_str() {
+                    let key = text(arg(a, 1));
+                    let val = text(arg(a, 2));
+                    crate::campaign_runtime::apply_class_property(
+                        sim,
+                        &w.team_classes,
+                        cls,
+                        &key,
+                        &val,
+                    );
+                }
                 nothing()
             }
             "KillObject" => {

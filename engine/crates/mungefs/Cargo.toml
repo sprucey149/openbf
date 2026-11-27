@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 extensions = { path = "../extensions" }
+manifest = { path = "../manifest" }
 sha2 = "0.10"
 serde.workspace = true
 ron.workspace = true

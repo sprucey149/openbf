@@ -110,6 +110,12 @@ struct MissionDefRon {
     layers: Vec<String>,
     #[serde(skip_serializing_if = "WorldEvents::is_empty")]
     world_events: WorldEvents,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    class_properties: Vec<(String, String, String)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    script: Option<manifest::script_ir::ScriptDef>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    script_libs: Vec<(String, String)>,
     source: String,
 }
 
@@ -136,7 +142,12 @@ fn world_action(action: &WorldAction) -> Action {
 }
 
 /// Convert a statically analyzed legacy BF2 mission into OpenBF mission RON.
-pub fn mission_to_ron(map_key: &str, m: &InspectedMission) -> Result<String> {
+pub fn mission_to_ron(
+    map_key: &str,
+    m: &InspectedMission,
+    script: Option<manifest::script_ir::ScriptDef>,
+    script_libs: Vec<(String, String)>,
+) -> Result<String> {
     if !m.supported {
         bail!(
             "mission '{}' ({}) is unsupported: {}",
@@ -270,6 +281,9 @@ pub fn mission_to_ron(map_key: &str, m: &InspectedMission) -> Result<String> {
                 .map(|(name, actions)| (name.clone(), actions.iter().map(world_action).collect()))
                 .collect(),
         },
+        class_properties: m.class_properties.clone(),
+        script,
+        script_libs,
         source: format!("addon:{}", m.script_name),
     };
 

@@ -16,7 +16,9 @@ use crate::{locl, open, UcfbError};
 mod world_events;
 
 const MAX_SCRIPT_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_LVL_BYTES: u64 = 128 * 1024 * 1024;
+/// The largest `ucfb` file there can be: its length is a 32-bit field after an
+/// 8-byte header. The game's own addons run past 200 MB (`SEN.lvl`).
+pub const MAX_LVL_BYTES: u64 = u32::MAX as u64 + 8;
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 const MAX_README_BYTES: u64 = 8 * 1024;
 const MAX_WALK_ENTRIES: usize = 4096;
@@ -161,6 +163,8 @@ pub struct InspectedMission {
     pub ai_snipe_suitability: Option<f32>,
     pub ai_no_capture: Vec<(String, u8)>,
     pub ctf: Option<ParsedCtf>,
+    pub class_properties: Vec<(String, String, String)>,
+    pub scripted_mode: bool,
     pub supported: bool,
     pub unsupported_reason: Option<String>,
     pub unsupported_features: Vec<UnsupportedScriptFeature>,
@@ -184,6 +188,8 @@ pub struct AddonInspection {
     pub description: String,
     pub openbf_manifest_ron: Option<String>,
     pub core_lvl: Option<PathBuf>,
+    pub shell_icon_lvls: Vec<PathBuf>,
+    pub custom_mode_meta: BTreeMap<String, extensions::mods::ModModeMeta>,
     pub mission_lvls: Vec<PathBuf>,
     pub map_titles: BTreeMap<String, (Option<String>, Option<String>)>,
     pub missions: Vec<InspectedMission>,
@@ -707,6 +713,23 @@ fn inspect_game_folder(
         }
         out.mission_lvls.extend(part.mission_lvls);
         out.missions.extend(part.missions);
+        for p in part.shell_icon_lvls {
+            if !out.shell_icon_lvls.contains(&p) {
+                out.shell_icon_lvls.push(p);
+            }
+        }
+        for (k, v) in part.custom_mode_meta {
+            let entry = out.custom_mode_meta.entry(k).or_default();
+            if entry.name.is_none() {
+                entry.name = v.name;
+            }
+            if entry.description.is_none() {
+                entry.description = v.description;
+            }
+            if entry.icon.is_none() {
+                entry.icon = v.icon;
+            }
+        }
         for (id, title) in part.map_titles {
             out.map_titles.entry(id).or_insert(title);
         }
@@ -721,16 +744,18 @@ fn inspect_game_folder(
             }));
     }
     if let Some(pc) = resolve_lvl_pc_dir(&game.dir, root_canon) {
-        out.stock_override_lvls.extend(
-            facts
-                .all_lvls
-                .iter()
-                .filter(|(_, abs)| abs.starts_with(&pc))
-                .map(|(rel_path, abs_path)| OverrideLvl {
-                    rel_path: rel_path.clone(),
-                    abs_path: abs_path.clone(),
-                }),
-        );
+        for (rel_path, abs_path) in facts.all_lvls.iter().filter(|(_, abs)| abs.starts_with(&pc)) {
+            let low = rel_path.to_ascii_lowercase();
+            if (low.ends_with("/shell.lvl") || low == "shell.lvl")
+                && !out.shell_icon_lvls.contains(abs_path)
+            {
+                out.shell_icon_lvls.push(abs_path.clone());
+            }
+            out.stock_override_lvls.push(OverrideLvl {
+                rel_path: rel_path.clone(),
+                abs_path: abs_path.clone(),
+            });
+        }
     }
     out.content_root = Some(game.dir);
     classify(&mut out, true);
@@ -830,6 +855,8 @@ struct AddmeSummary {
     legacy_ids: BTreeSet<String>,
     registered_scripts: BTreeSet<String>,
     core_lvl_hint: Option<String>,
+    shell_lvl_hints: Vec<String>,
+    custom_mode_meta: BTreeMap<String, extensions::mods::ModModeMeta>,
     unsupported: Vec<UnsupportedScriptFeature>,
     warnings: Vec<String>,
 }
@@ -879,25 +906,67 @@ fn parse_addme_script(bytes: &[u8]) -> Result<AddmeSummary, String> {
                     if !era_on {
                         continue;
                     }
-                    for (mode_code, field_prefix) in [
-                        ("con", "mode_con_"),
-                        ("ctf", "mode_ctf_"),
-                        ("1flag", "mode_1flag_"),
-                        ("eli", "mode_eli_"),
-                        ("hunt", "mode_hunt_"),
-                        ("ass", "mode_ass_"),
-                        ("tdm", "mode_tdm_"),
-                    ] {
-                        let key = format!("{field_prefix}{era_code}");
-                        if entry
-                            .get_str_ci(&key)
-                            .and_then(|v| v.is_truthy())
-                            .unwrap_or(false)
-                        {
+                    let era_suffix = format!("_{era_code}");
+                    for (k, v) in &entry.entries {
+                        let lua50::LuaKey::Str(key) = k else {
+                            continue;
+                        };
+                        let low = key.to_ascii_lowercase();
+                        let Some(rest) = low.strip_prefix("mode_") else {
+                            continue;
+                        };
+                        let Some(mode_code) = rest.strip_suffix(&era_suffix) else {
+                            continue;
+                        };
+                        if !mode_code.is_empty() && v.is_truthy().unwrap_or(false) {
                             let script = expand_mapluafile(tmpl, era_code, mode_code);
                             summary
                                 .registered_scripts
                                 .insert(script.to_ascii_lowercase());
+                        }
+                    }
+                }
+                // Extract v1.3-style `change = { mode_<suffix> = { name, about, icon } }` metadata.
+                if let Some(LuaVal::Table(ctid)) = entry.get_str_ci("change") {
+                    if let Some(change) = env.table(*ctid) {
+                        for (ck, cv) in &change.entries {
+                            let (lua50::LuaKey::Str(ckey), LuaVal::Table(mtid)) = (ck, cv) else {
+                                continue;
+                            };
+                            let low = ckey.to_ascii_lowercase();
+                            let Some(mode_code) = low.strip_prefix("mode_") else {
+                                continue;
+                            };
+                            let Some(mtbl) = env.table(*mtid) else {
+                                continue;
+                            };
+                            let meta = summary
+                                .custom_mode_meta
+                                .entry(mode_code.to_owned())
+                                .or_default();
+                            if meta.name.is_none() {
+                                meta.name = mtbl
+                                    .get_str_ci("name")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.trim().to_owned())
+                                    .filter(|s| !s.is_empty());
+                            }
+                            if meta.description.is_none() {
+                                meta.description = mtbl
+                                    .get_str_ci("about")
+                                    .or_else(|| mtbl.get_str_ci("description"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.trim().to_owned())
+                                    .filter(|s| !s.is_empty());
+                            }
+                            if meta.icon.is_none() {
+                                meta.icon = mtbl
+                                    .get_str_ci("icon")
+                                    .or_else(|| mtbl.get_str_ci("icon2"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.trim().to_ascii_lowercase())
+                                    .filter(|s| !s.is_empty());
+                            }
                         }
                     }
                 }
@@ -920,8 +989,11 @@ fn parse_addme_script(bytes: &[u8]) -> Result<AddmeSummary, String> {
                 }
             } else if call.func.eq_ignore_ascii_case("ReadDataFile") {
                 if let Some(path) = call.args.first().and_then(|v| v.as_str()) {
-                    if path.to_ascii_lowercase().contains("core.lvl") {
+                    let low = path.to_ascii_lowercase();
+                    if low.contains("core.lvl") {
                         summary.core_lvl_hint = Some(path.to_owned());
+                    } else if low.ends_with(".lvl") {
+                        summary.shell_lvl_hints.push(path.to_owned());
                     }
                 }
             }
@@ -1052,6 +1124,8 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
         description: String::new(),
         openbf_manifest_ron: None,
         core_lvl: None,
+        shell_icon_lvls: Vec::new(),
+        custom_mode_meta: BTreeMap::new(),
         mission_lvls: Vec::new(),
         map_titles: BTreeMap::new(),
         missions: Vec::new(),
@@ -1183,7 +1257,21 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
             .as_deref()
             .and_then(|h| resolve_inside_lvl_pc(&root_canon, pc, h).map(|(_, p)| p))
             .or_else(|| find_child_ci(pc, "core.lvl").filter(|p| p.is_file()));
+        for hint in &addme_summary.shell_lvl_hints {
+            if let Some((_, p)) = resolve_inside_lvl_pc(&root_canon, pc, hint) {
+                if !out.shell_icon_lvls.contains(&p) {
+                    out.shell_icon_lvls.push(p);
+                }
+            }
+        }
     }
+    for (rel, p) in &facts.all_lvls {
+        let low = rel.to_ascii_lowercase();
+        if (low.ends_with("/shell.lvl") || low == "shell.lvl") && !out.shell_icon_lvls.contains(p) {
+            out.shell_icon_lvls.push(p.clone());
+        }
+    }
+    out.custom_mode_meta = addme_summary.custom_mode_meta.clone();
 
     // Choose primary legacy addon ID.
     let mut candidate_ids: Vec<String> = addme_summary.legacy_ids.iter().cloned().collect();
@@ -1393,9 +1481,17 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                             .collect();
                     }
                 }
+                let ir_check = lua50::ir::translate(proto).err().map(|e| e.to_string());
                 let shares_variant_entry = variants.len() > 1;
                 for mut mission in variants {
                     mission.shares_variant_entry = shares_variant_entry;
+                    if mission.scripted_mode && mission.supported {
+                        if let Some(ref err) = ir_check {
+                            mission.supported = false;
+                            mission.unsupported_reason =
+                                Some(format!("Script translation failed: {err}"));
+                        }
+                    }
                     for load in &mission.world_loads {
                         if let Some(c) = canon_norm(&load.path) {
                             referenced_lvls_canon.insert(c);

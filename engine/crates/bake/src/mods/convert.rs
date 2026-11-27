@@ -120,6 +120,21 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     let mut missions_written = 0usize;
     let mut shared_world_files = SharedWorldFiles::default();
     let mut sound_bakes: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
+    let mut mission_scripts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for ml_path in &insp.mission_lvls {
+        if let Ok(bytes) = std::fs::read(ml_path) {
+            if let Ok(chunks) = mungefs::lua50::extract_scripts(&bytes) {
+                for sc in chunks {
+                    if sc.body.starts_with(b"\x1bLua") {
+                        mission_scripts
+                            .entry(sc.name.to_ascii_lowercase())
+                            .or_insert(sc.body);
+                    }
+                }
+            }
+        }
+    }
+    let mut written_libs: BTreeMap<String, String> = BTreeMap::new();
 
     let total_steps = groups.len().max(1);
     for (gi, g) in groups.iter().enumerate() {
@@ -252,15 +267,75 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             let mut supported = pm.mission.supported;
             let mut reason = pm.mission.unsupported_reason.clone();
             if supported {
-                match mission_to_ron(&g.map_key, pm.mission) {
-                    Ok(ron_text) => {
-                        std::fs::write(missions_dir.join(&pm.mission_ron), ron_text)?;
-                        missions_written += 1;
+                let mut script_ir = None;
+                let mut script_libs = Vec::new();
+                if pm.mission.scripted_mode {
+                    let key = pm.mission.script_name.to_ascii_lowercase();
+                    match mission_scripts
+                        .get(&key)
+                        .ok_or_else(|| anyhow::anyhow!("script chunk `{}` missing", pm.mission.script_name))
+                        .and_then(|body| Ok(mungefs::lua50::ir::translate_bytes(body)?))
+                    {
+                        Ok(def) => {
+                            // Transitively translate any `ScriptCB_DoFile` helpers shipped in the mod's mission.lvl.
+                            let mut queue: std::collections::VecDeque<String> =
+                                def.do_files().into_iter().collect();
+                            let mut seen = std::collections::BTreeSet::new();
+                            while let Some(lib_name) = queue.pop_front() {
+                                let low = lib_name.to_ascii_lowercase();
+                                if !seen.insert(low.clone()) {
+                                    continue;
+                                }
+                                let Some(lib_body) = mission_scripts.get(&low) else {
+                                    continue;
+                                };
+                                if let Some(ron_name) = written_libs.get(&low) {
+                                    script_libs.push((low, ron_name.clone()));
+                                    continue;
+                                }
+                                match mungefs::lua50::ir::translate_bytes(lib_body) {
+                                    Ok(lib_def) => {
+                                        for dep in lib_def.do_files() {
+                                            queue.push_back(dep);
+                                        }
+                                        let ron_name = format!("{}__lib_{low}.ron", opts.namespace);
+                                        let lib_text =
+                                            ron::ser::to_string_pretty(&lib_def, crate::pretty())?;
+                                        std::fs::write(missions_dir.join(&ron_name), lib_text)?;
+                                        written_libs.insert(low.clone(), ron_name.clone());
+                                        script_libs.push((low, ron_name));
+                                    }
+                                    Err(e) => {
+                                        warnings.push(format!(
+                                            "Helper script `{lib_name}` for `{}` could not be translated ({e}).",
+                                            pm.mission.script_name
+                                        ));
+                                    }
+                                }
+                            }
+                            script_ir = Some(def);
+                        }
+                        Err(e) => {
+                            supported = false;
+                            reason = Some(format!("Script translation failed: {e}"));
+                            warnings.push(format!(
+                                "Mission `{}` skipped: {e}",
+                                pm.mission.script_name
+                            ));
+                        }
                     }
-                    Err(e) => {
-                        supported = false;
-                        reason = Some(e.to_string());
-                        warnings.push(format!("Mission `{}` skipped: {e}", pm.mission.script_name));
+                }
+                if supported {
+                    match mission_to_ron(&g.map_key, pm.mission, script_ir, script_libs) {
+                        Ok(ron_text) => {
+                            std::fs::write(missions_dir.join(&pm.mission_ron), ron_text)?;
+                            missions_written += 1;
+                        }
+                        Err(e) => {
+                            supported = false;
+                            reason = Some(e.to_string());
+                            warnings.push(format!("Mission `{}` skipped: {e}", pm.mission.script_name));
+                        }
                     }
                 }
             }
@@ -354,6 +429,41 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     }
     let declared_overrides = Vec::new();
 
+    // Bake custom shell / mode icons from addme.script shell LVLs (e.g. dtshell.lvl)
+    // and any mod-shipped shell.lvl.
+    let mut has_shell_icons = false;
+    if !insp.shell_icon_lvls.is_empty() {
+        let icons_dir = staging
+            .join("assets")
+            .join(format!("{}__shell_icons", opts.namespace));
+        let mut baked_names = std::collections::BTreeSet::new();
+        for lvl_path in &insp.shell_icon_lvls {
+            let Ok(bytes) = std::fs::read(lvl_path) else {
+                continue;
+            };
+            let Ok(root) = mungefs::open(&bytes) else {
+                continue;
+            };
+            for tex in mungefs::texture_pc::find_textures(root) {
+                let name = tex.name.to_ascii_lowercase();
+                if !name.contains("icon") || !baked_names.insert(name.clone()) {
+                    continue;
+                }
+                let Some(surf) = tex.best() else { continue };
+                let Some(face) = surf.faces.first() else { continue };
+                let Some(mip0) = face.mips.first() else { continue };
+                if mip0.rgba.len() != (surf.width * surf.height * 4) as usize {
+                    continue;
+                }
+                let _ = std::fs::create_dir_all(&icons_dir);
+                let ktx = crate::ktx2w::write_rgba8(surf.width, surf.height, &[mip0.rgba.clone()]);
+                if std::fs::write(icons_dir.join(format!("{name}.ktx2")), ktx).is_ok() {
+                    has_shell_icons = true;
+                }
+            }
+        }
+    }
+
     progress(opts.emit_progress, 95, "Finalizing versioned cache...");
     let meta = ModCacheMeta {
         schema_version: MOD_CACHE_SCHEMA_VERSION,
@@ -379,6 +489,8 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         unsupported: replaced.unsupported,
         catalog_digest: opts.env.catalogs.digest.clone(),
         target_choices: opts.env.selections.for_mod(&opts.mod_id),
+        custom_modes: insp.custom_mode_meta.clone(),
+        has_shell_icons,
     };
     meta.save_atomic(&staging)?;
 

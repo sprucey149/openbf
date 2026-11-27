@@ -607,7 +607,7 @@ pub(super) fn make_walk_with_counts(
     let mut layout = game::layout::MapLayout::from_mission_manifest_mode(
         &scene.manifest,
         hunt,
-        b.mission.as_ref().is_some_and(|m| m.is_campaign()),
+        b.mission.as_ref().is_some_and(|m| m.has_script()),
         b.mission.as_ref().is_some_and(|m| m.is_ctf()),
     );
     if let Some(m) = b.mission.as_ref().filter(|m| m.is_hunt()) {
@@ -666,7 +666,7 @@ pub(super) fn make_walk_with_counts(
     }
     if let Some(counts) = ai_counts {
         walk.add_posts(&layout);
-        let saved_cp_owners = if let Some(m) = b.mission.as_ref().filter(|m| m.is_campaign()) {
+        let saved_cp_owners = if let Some(m) = b.mission.as_ref().filter(|m| m.has_script()) {
             game::campaign_runtime::CampaignRuntime::kill_startup_posts(&mut walk.sim, &m.killed)
         } else {
             Vec::new()
@@ -746,6 +746,24 @@ pub(super) fn make_walk_with_counts(
         }
         if let Some(m) = &b.mission {
             walk.particle_lod_bias = m.particle_lod_bias.unwrap_or(0.0);
+            if !m.class_properties.is_empty() {
+                let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
+                    walk.teams[t]
+                        .classes
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect()
+                });
+                for (cls, prop, val) in &m.class_properties {
+                    game::campaign_runtime::apply_class_property(
+                        &mut walk.sim,
+                        &team_classes,
+                        cls,
+                        prop,
+                        val,
+                    );
+                }
+            }
             for t in 0..2usize {
                 walk.sim
                     .set_ai_spawn_allowed(t as u8, m.teams[t].allows_ai_spawn_initially());
@@ -778,7 +796,15 @@ pub(super) fn make_walk_with_counts(
                 m,
                 &scene.manifest,
             );
-            if let Some(spec) = m.campaign.clone() {
+            let script_spec = m.campaign.clone().or_else(|| {
+                m.script.clone().map(|script| {
+                    let mut spec = game::mission::CampaignMissionDef::default();
+                    spec.script = Some(script);
+                    spec.libs = m.loaded_script_libs.clone();
+                    spec
+                })
+            });
+            if let Some(spec) = script_spec {
                 let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
                     walk.teams[t]
                         .classes
@@ -794,7 +820,15 @@ pub(super) fn make_walk_with_counts(
                     saved_cp_owners,
                     &walk.sim,
                 );
-                rt.set_team_rosters(team_classes, [0, 0]);
+                rt.set_is_campaign(m.is_campaign());
+                rt.set_team_rosters(
+                    team_classes,
+                    if m.is_campaign() {
+                        [0, 0]
+                    } else {
+                        [m.teams[0].units, m.teams[1].units]
+                    },
+                );
                 rt.set_team_factions([
                     walk.teams[0].faction.as_str(),
                     walk.teams[1].faction.as_str(),
@@ -838,7 +872,7 @@ pub(super) fn make_walk_with_counts(
         // Campaigns with spawn screens defer their opening AI wave until the
         // human player spawns so `onfirstspawn` (e.g. Kamino switching Team 1
         // from `boba` to `cp5`) updates CP ownership before allies spawn.
-        let opening_counts = if walk.campaign.is_some() {
+        let opening_counts = if b.mission.as_ref().is_some_and(|m| m.is_campaign()) {
             [0, 0]
         } else {
             counts

@@ -96,6 +96,23 @@ impl Ctx<'_> {
                 }
                 nothing()
             }
+            "GetUnitCount" => one(Value::Num(
+                sim_team(arg(a, 0)).map_or(0, |t| w.team_size(t)) as f32,
+            )),
+            "GetTeamClassCount" => one(Value::Num(
+                sim_team(arg(a, 0))
+                    .and_then(|t| w.team_classes.get(usize::from(t)).map(Vec::len))
+                    .unwrap_or(0) as f32,
+            )),
+            "ForceHumansOntoTeam1" => nothing(),
+            "ScriptCB_PlayerSuicide" => {
+                if let Some(u) = sim.unit_mut(w.player) {
+                    if u.alive {
+                        u.health.cur = 0.0;
+                    }
+                }
+                nothing()
+            }
             "AllowAISpawn" => {
                 if let Some(t) = sim_team(arg(a, 0)).filter(|t| *t < 2) {
                     let allow = arg(a, 1).truthy();
@@ -148,10 +165,10 @@ impl Ctx<'_> {
                 }
                 nothing()
             }
-            "SetTeamAsFriend" | "SetTeamAsEnemy" => {
+            "SetTeamAsFriend" | "SetTeamAsEnemy" | "SetTeamAsNeutral" => {
                 if let (Some(x), Some(y)) = (sim_team(arg(a, 0)), sim_team(arg(a, 1))) {
                     if x >= 2 || y >= 2 {
-                        sim.set_team_relation(x, y, name == "SetTeamAsFriend");
+                        sim.set_team_relation(x, y, name != "SetTeamAsEnemy");
                     }
                 }
                 nothing()

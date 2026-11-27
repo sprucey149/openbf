@@ -564,6 +564,7 @@ pub fn rk_base(root: &Proto) -> usize {
 
 mod eval;
 pub use eval::*;
+pub mod ir;
 
 #[cfg(test)]
 mod tests;

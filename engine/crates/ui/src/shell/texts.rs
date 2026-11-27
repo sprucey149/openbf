@@ -22,6 +22,8 @@ pub struct IaTexts {
     pub session_options: String,
     pub(super) commands: Vec<(String, String)>,
     pub(super) modes: Vec<(String, String)>,
+    /// Mod-declared modes: `(subst, display_name, description, icon_name)`.
+    pub(super) custom_modes: Vec<(String, String, String, String)>,
     pub(super) eras: Vec<String>,
     pub(super) groups: Vec<(String, String)>,
     /// `common.sides.<f>.name` for all, imp, rep, cis.
@@ -154,6 +156,7 @@ impl IaTexts {
                     (t(a), t(b))
                 })
                 .collect(),
+            custom_modes: Vec::new(),
             eras: ERAS.iter().map(|e| t(e.text())).collect(),
             groups: GROUPS
                 .iter()
@@ -227,10 +230,48 @@ impl IaTexts {
         (a, b)
     }
 
-    pub fn mode(&self, m: Mode) -> (&str, &str) {
-        let i = MODES.iter().position(|x| *x == m).unwrap_or(0);
-        let (a, b) = &self.modes[i];
-        (a, b)
+    /// Register localized display name, description, and icon for a mod-declared mode.
+    pub fn set_custom_mode(&mut self, subst: &str, name: String, desc: String, icon: String) {
+        let low = subst.to_ascii_lowercase();
+        if let Some(entry) = self.custom_modes.iter_mut().find(|(s, _, _, _)| *s == low) {
+            entry.1 = name;
+            entry.2 = desc;
+            entry.3 = icon;
+        } else {
+            self.custom_modes.push((low, name, desc, icon));
+        }
+    }
+
+    pub fn mode(&self, m: &Mode) -> (String, String) {
+        if let Some(i) = MODES.iter().position(|x| x == m) {
+            let (a, b) = &self.modes[i];
+            return (a.clone(), b.clone());
+        }
+        if let Mode::Custom(s) = m {
+            if let Some((_, name, desc, _)) = self
+                .custom_modes
+                .iter()
+                .find(|(k, _, _, _)| k.eq_ignore_ascii_case(s))
+            {
+                return (name.clone(), desc.clone());
+            }
+        }
+        let name = m.english();
+        let desc = format!("{name}\r\nCustom mod game mode.");
+        (name, desc)
+    }
+
+    pub fn mode_icon(&self, m: &Mode) -> String {
+        if let Mode::Custom(s) = m {
+            if let Some((_, _, _, icon)) = self
+                .custom_modes
+                .iter()
+                .find(|(k, _, _, _)| k.eq_ignore_ascii_case(s))
+            {
+                return icon.clone();
+            }
+        }
+        m.icon().to_owned()
     }
 
     pub fn era(&self, e: Era) -> &str {

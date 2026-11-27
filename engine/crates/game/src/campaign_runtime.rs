@@ -32,6 +32,173 @@ use std::sync::Arc;
 mod world_events;
 pub use world_events::WorldEventRuntime;
 
+/// Apply a `SetClassProperty(class, prop, value)` override to every matching
+/// class in `sim.classes` and to any already-alive units of that class.
+pub fn apply_class_property(
+    sim: &mut Sim,
+    team_classes: &[Vec<String>; 2],
+    class_name: &str,
+    prop: &str,
+    val: &str,
+) {
+    let key = prop.trim().to_ascii_lowercase();
+    let fval = val
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<f32>().ok());
+    for t in 0..2usize {
+        for (ci, name) in team_classes[t].iter().enumerate() {
+            if !name.eq_ignore_ascii_case(class_name) {
+                continue;
+            }
+            let Some(cls) = sim.classes[t].get_mut(ci) else {
+                continue;
+            };
+            match key.as_str() {
+                "maxhealth" => {
+                    if let Some(v) = fval.filter(|v| *v > 0.0) {
+                        cls.max_health = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.health.max = v;
+                                u.health.cur = u.health.cur.fmin(v);
+                            }
+                        }
+                    }
+                }
+                "curhealth" => {
+                    if let Some(v) = fval {
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.health.cur = v.clamp(0.0, u.health.max);
+                            }
+                        }
+                    }
+                }
+                "addhealth" => {
+                    if let Some(v) = fval {
+                        cls.consts.add_health = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.add_health = v;
+                                u.spec.consts.add_health = v;
+                            }
+                        }
+                    }
+                }
+                "maxshield" => {
+                    if let Some(v) = fval {
+                        let v = v.fmax(0.0);
+                        cls.consts.max_shield = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.max_shield = v;
+                                u.spec.consts.max_shield = v;
+                                u.health.shield_max = v;
+                                u.health.shield = u.health.shield.fmin(v);
+                            }
+                        }
+                    }
+                }
+                "addshield" => {
+                    if let Some(v) = fval {
+                        cls.consts.add_shield = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.add_shield = v;
+                                u.spec.consts.add_shield = v;
+                            }
+                        }
+                    }
+                }
+                "pointstounlock" => {
+                    if let Some(v) = fval {
+                        cls.unlock_points = v.fmax(0.0).round() as u32;
+                    }
+                }
+                "captureposts" => {
+                    if let Some(v) = fval {
+                        let on = v != 0.0;
+                        cls.capture_posts = on;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.capture_posts = on;
+                            }
+                        }
+                    }
+                }
+                "immunetomines" => {
+                    if let Some(v) = fval {
+                        let on = v != 0.0;
+                        cls.consts.immune_to_mines = on;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.immune_to_mines = on;
+                            }
+                        }
+                    }
+                }
+                "maxspeed" => {
+                    if let Some(v) = fval.filter(|v| *v > 0.0) {
+                        cls.consts.max_speed = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.max_speed = v;
+                            }
+                        }
+                    }
+                }
+                "maxstrafespeed" => {
+                    if let Some(v) = fval.filter(|v| *v > 0.0) {
+                        cls.consts.max_strafe_speed = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.max_strafe_speed = v;
+                            }
+                        }
+                    }
+                }
+                "maxturnspeed" => {
+                    if let Some(v) = fval.filter(|v| *v > 0.0) {
+                        cls.consts.max_turn_speed = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.max_turn_speed = v;
+                            }
+                        }
+                    }
+                }
+                "energybar" => {
+                    if let Some(v) = fval.filter(|v| *v > 0.0) {
+                        cls.consts.energy_bar = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.energy_bar = v;
+                            }
+                        }
+                    }
+                }
+                "energyrestore" => {
+                    if let Some(v) = fval {
+                        cls.consts.energy_restore = v;
+                        for u in &mut sim.units {
+                            if u.alive && u.team as usize == t && usize::from(u.spec.class) == ci {
+                                u.consts.energy_restore = v;
+                            }
+                        }
+                    }
+                }
+                "weaponammo1" => {
+                    if let Some(v) = fval {
+                        cls.total_clips = v.fmax(0.0).round() as u32;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 /// A scripted callback's event (`On<Kind>` registers, `Release<Kind>` drops).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EventKind {
@@ -46,6 +213,7 @@ pub(crate) enum EventKind {
     ObjectRespawn,
     ObjectInit,
     ObjectDamage,
+    ObjectHack,
     EnterRegion,
     LeaveRegion,
     FinishCapture,
@@ -74,6 +242,7 @@ impl EventKind {
             "ObjectRespawn" => Self::ObjectRespawn,
             "ObjectInit" => Self::ObjectInit,
             "ObjectDamage" => Self::ObjectDamage,
+            "ObjectHack" => Self::ObjectHack,
             "EnterRegion" => Self::EnterRegion,
             "LeaveRegion" => Self::LeaveRegion,
             "FinishCapture" => Self::FinishCapture,
@@ -252,6 +421,7 @@ pub(crate) struct World {
     pub class_names: Vec<String>,
 
     pub setup: bool,
+    pub is_campaign: bool,
     pub post_loaded: bool,
     pub player: UnitHandle,
     pub player_team: u8,
@@ -282,6 +452,7 @@ pub(crate) struct World {
     pub hints: Vec<String>,
     pub flags: Vec<FlagEnt>,
     pub entities: Vec<(String, String, Vec3)>,
+    pub matrices: Vec<(Vec3, f32)>,
     pub allow_ai_pickup: bool,
     pub hide_cps: bool,
     pub shown_timer: Option<u32>,
@@ -339,6 +510,10 @@ pub(crate) struct Ctx<'a> {
 impl CampaignRuntime {
     /// Mark CPs named in `killed` as disabled before the opening wave spawns,
     /// returning each post's pre-kill owner so `RespawnObject` can restore it.
+    pub fn set_is_campaign(&mut self, is_campaign: bool) {
+        self.w.is_campaign = is_campaign;
+    }
+
     pub fn kill_startup_posts(sim: &mut Sim, killed: &[String]) -> Vec<Option<u8>> {
         let mut saved = Vec::with_capacity(sim.cps.len());
         for cp in &mut sim.cps {
@@ -456,6 +631,7 @@ impl CampaignRuntime {
             class_order: [Vec::new(), Vec::new()],
             class_names: Vec::new(),
             setup: false,
+            is_campaign: true,
             post_loaded: false,
             player: UnitHandle { index: 0, gen: 0 },
             player_team: 0,
@@ -479,6 +655,7 @@ impl CampaignRuntime {
             hints: Vec::new(),
             flags: Vec::new(),
             entities: Vec::new(),
+            matrices: Vec::new(),
             allow_ai_pickup: true,
             hide_cps: false,
             shown_timer: None,

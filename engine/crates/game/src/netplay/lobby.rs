@@ -22,7 +22,7 @@ use super::ContentManifest;
 use serde::{Deserialize, Serialize};
 use ui::shell::{
     Entry, Era, Group, InstantAction, ListCursor, MapEntry, MapPick, Mode, ModePick, Page, Side,
-    State, ERAS, GROUPS, MODES,
+    State, ERAS, GROUPS,
 };
 
 /// How long the host waits for every player's `Ready` after a round.
@@ -265,7 +265,7 @@ impl SideKey {
 }
 
 fn mode_of(subst: &str) -> Option<Mode> {
-    MODES.into_iter().find(|m| m.subst() == subst)
+    Mode::from_subst(subst)
 }
 
 /// The host's page as data.
@@ -393,7 +393,7 @@ impl LobbyState {
                 MapPick::One(i) => Some(key(i)),
                 MapPick::Folder(_) | MapPick::All => None,
             },
-            picked_mode: match ia.picked_mode {
+            picked_mode: match &ia.picked_mode {
                 ModePick::One(m) => Some(m.subst().to_owned()),
                 ModePick::All => None,
             },

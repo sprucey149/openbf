@@ -259,42 +259,55 @@ impl MapEntry {
         !self.modes[era.index()].is_empty()
     }
 
-    /// The map's modes in `gMapModes` order (any era).
+    /// The map's modes in `gMapModes` order followed by any mod-declared modes (any era).
     pub(super) fn all_modes(&self) -> Vec<Mode> {
-        MODES
+        let mut out: Vec<Mode> = MODES
             .into_iter()
             .filter(|m| self.modes.iter().any(|e| e.contains(m)))
-            .collect()
+            .collect();
+        let mut custom: Vec<Mode> = Vec::new();
+        for era_modes in &self.modes {
+            for m in era_modes {
+                if matches!(m, Mode::Custom(_)) && !custom.contains(m) {
+                    custom.push(m.clone());
+                }
+            }
+        }
+        custom.sort_by(|a, b| a.subst().cmp(b.subst()));
+        out.extend(custom);
+        out
     }
 
     /// Whether the port can run `mode` with `armies` here: a baked map, a
     /// mode the sim runs, and a mission file - of that pair (either order)
     /// for an era, any of the mode for a cross-era pair (§7).
-    pub fn runnable(&self, mode: Mode, side: Side) -> bool {
-        if !self.baked || !PORT_MODES.contains(&mode) {
+    pub fn runnable(&self, mode: &Mode, side: Side) -> bool {
+        if !self.baked || !mode.is_supported() {
             return false;
         }
-        let mut pairs = self.missions.iter().filter(|(m, _)| *m == mode);
-        if mode == Mode::Hunt {
-            return matches!(side, Side::Era(era) if self.modes[era.index()].contains(&mode))
+        let mut pairs = self.missions.iter().filter(|(m, _)| m == mode);
+        if *mode == Mode::Hunt {
+            return matches!(side, Side::Era(era) if self.modes[era.index()].contains(mode))
                 && pairs.next().is_some();
         }
         match side {
             Side::Era(era) => {
-                self.modes[era.index()].contains(&mode)
+                self.modes[era.index()].contains(mode)
                     && pairs.any(|(_, p)| {
                         let a = era.armies();
                         (p[0] == a[0] && p[1] == a[1]) || (p[0] == a[1] && p[1] == a[0])
                     })
             }
-            Side::Mixed(_) => !matches!(mode, Mode::Eli | Mode::Xl) && pairs.next().is_some(),
+            Side::Mixed(_) => {
+                !matches!(mode, Mode::Eli | Mode::Xl | Mode::Custom(_)) && pairs.next().is_some()
+            }
         }
     }
 
-    pub(super) fn launch_armies(&self, mode: Mode, side: Side) -> [String; 2] {
+    pub(super) fn launch_armies(&self, mode: &Mode, side: Side) -> [String; 2] {
         let armies = side.armies();
-        if mode == Mode::Hunt {
-            let mut pairs = self.missions.iter().filter(|(m, _)| *m == mode);
+        if *mode == Mode::Hunt {
+            let mut pairs = self.missions.iter().filter(|(m, _)| m == mode);
             // Addons can register Hunt in both eras. Pick the era's
             // authored pairing before using the retail native-faction row.
             let exact = pairs.clone().find(|(_, pair)| {
@@ -342,8 +355,11 @@ pub fn catalog_with_mods(
             .unwrap_or_else(|| format!("{}_{code}", game.tag()));
         let missions: Vec<_> = MODES
             .into_iter()
-            .filter(|&mode| mode != Mode::Xl || (game == Game::Bf2 && !xl_eras(&code).is_empty()))
-            .flat_map(|m| missions_fn(&key, m).into_iter().map(move |p| (m, p)))
+            .filter(|mode| *mode != Mode::Xl || (game == Game::Bf2 && !xl_eras(&code).is_empty()))
+            .flat_map(|m| {
+                let pairs = missions_fn(&key, m.clone());
+                pairs.into_iter().map(move |p| (m.clone(), p))
+            })
             .collect();
         let mut modes: [Vec<Mode>; 2] = modes;
         if game == Game::Bf2 {
@@ -431,13 +447,18 @@ pub fn catalog_with_mods(
     }
     for m in mod_maps {
         let mut missions = Vec::new();
-        for mode in MODES
-            .into_iter()
-            .filter(|mode| m.modes.iter().any(|era_modes| era_modes.contains(mode)))
-        {
+        let mut all_mod_modes: Vec<Mode> = Vec::new();
+        for era_modes in &m.modes {
+            for mode in era_modes {
+                if !all_mod_modes.contains(mode) {
+                    all_mod_modes.push(mode.clone());
+                }
+            }
+        }
+        for mode in all_mod_modes {
             for key in &m.variant_keys {
-                for pair in missions_fn(key, mode) {
-                    let mission = (mode, pair);
+                for pair in missions_fn(key, mode.clone()) {
+                    let mission = (mode.clone(), pair);
                     if !missions.contains(&mission) {
                         missions.push(mission);
                     }

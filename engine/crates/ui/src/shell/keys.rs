@@ -214,7 +214,7 @@ impl InstantAction {
                     self.state = State::Map;
                 } else if i.confirm && live.get(self.mode_list.at) == Some(&true) {
                     self.click(MenuSound::Accept);
-                    self.picked_mode = self.mode_picks()[self.mode_list.at];
+                    self.picked_mode = self.mode_picks()[self.mode_list.at].clone();
                     self.state = State::Era;
                     let live = self.live(&self.side_rows());
                     self.era_list = ListCursor::first(&live, ERA_ROWS);
@@ -232,7 +232,7 @@ impl InstantAction {
                     // The full popup opens silently over this accept.
                     self.click(MenuSound::Accept);
                     let side = self.side_picks()[self.era_list.at];
-                    self.add(self.picked_map, self.picked_mode, side);
+                    self.add(self.picked_map, self.picked_mode.clone(), side);
                     self.close_folder();
                     self.state = State::Command;
                     self.focus_command(Cmd::Launch);

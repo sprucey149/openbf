@@ -702,7 +702,7 @@ impl MapLayout {
         if !m.cp_blacklist.is_empty() {
             self.cps.retain(|c| !named(&m.cp_blacklist, &c.name));
         }
-        if !m.is_campaign() && !m.posts.is_empty() {
+        if !m.has_script() && !m.posts.is_empty() {
             self.cps.retain(|c| named(&m.posts, &c.name));
             for want in &m.posts {
                 if !self.cps.iter().any(|c| c.name.eq_ignore_ascii_case(want)) {
@@ -715,8 +715,8 @@ impl MapLayout {
         }
         let dropped_by_roster = before - self.cps.len();
 
-        let killed = if m.is_campaign() {
-            // Campaign scripts kill CPs at startup so `RespawnObject` can
+        let killed = if m.has_script() {
+            // Campaign and scripted mod missions kill CPs at startup so `RespawnObject` can
             // reactivate them in later stages.
             self.cps
                 .iter()

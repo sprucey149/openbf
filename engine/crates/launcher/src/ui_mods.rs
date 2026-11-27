@@ -1723,6 +1723,8 @@ mod tests {
             target_choices: std::collections::BTreeMap::new(),
             warnings: Vec::new(),
             unsupported: Vec::new(),
+            custom_modes: std::collections::BTreeMap::new(),
+            has_shell_icons: false,
         };
         meta.replacement_key =
             meta.expected_replacement_key(&catalog_digest, &std::collections::BTreeMap::new());

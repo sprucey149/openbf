@@ -17,78 +17,10 @@
 //! copy (`WalkSim::checkpoint`) and evaluation is deterministic: table
 //! traversal is insertion order, there is no hashing of values.
 
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub struct ScriptDef {
-    pub main: u32,
-    pub fns: Vec<FnDef>,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub struct FnDef {
-    pub name: String,
-    pub params: u16,
-    #[serde(default)]
-    pub vararg: bool,
-    pub locals: u16,
-    pub body: Vec<Stmt>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-pub enum BinOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-    Concat,
-    Eq,
-    Lt,
-    Le,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-pub enum IterKind {
-    Ipairs,
-    Pairs,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub enum Expr {
-    Nil,
-    Bool(bool),
-    Num(f32),
-    Str(String),
-    Local(u16),
-    Upval(u16),
-    Global(String),
-    Index(Box<Expr>, Box<Expr>),
-    Call(Box<Expr>, Vec<Expr>),
-    Method(Box<Expr>, String, Vec<Expr>),
-    Bin(BinOp, Box<Expr>, Box<Expr>),
-    Not(Box<Expr>),
-    Neg(Box<Expr>),
-    Closure(u32, Vec<Expr>),
-    Table(Vec<(Expr, Expr)>),
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub enum Stmt {
-    Do(Expr),
-    SetLocal(u16, Expr),
-    SetLocals(Vec<u16>, Expr),
-    SetGlobal(String, Expr),
-    SetUpval(u16, Expr),
-    SetIndex(Expr, Expr, Expr),
-    Return(Vec<Expr>),
-    If(Expr, Vec<Stmt>, Vec<Stmt>),
-    ForNum(u16, Expr, Expr, Expr, Vec<Stmt>),
-    ForIn(IterKind, Expr, Vec<u16>, Vec<Stmt>),
-    Close(u16),
-}
+pub use manifest::script_ir::{BinOp, Expr, FnDef, IterKind, ScriptDef, Stmt};
 
 /// An engine handle a binding returns (a character, a game object, a timer,
 /// an event registration, ...). Lua compares userdata by identity; these
@@ -107,6 +39,7 @@ pub enum Ud {
     Goal(u32),
     Region(u32),
     Point(u32, u32),
+    Matrix(u32),
     Stream(u32),
     Class(u32),
 }
@@ -227,6 +160,8 @@ struct Frame {
 
 enum Flow {
     Next,
+    Break,
+    Continue,
     Return(Vec<Value>),
 }
 
@@ -247,6 +182,7 @@ pub struct Interp {
     cells: Vec<Value>,
     steps: u32,
     depth: u32,
+    rng: core::rng::SimRng,
     pub printed: Vec<String>,
 }
 
@@ -271,6 +207,7 @@ impl Interp {
             cells: Vec::new(),
             steps: 0,
             depth: 0,
+            rng: core::rng::SimRng::new(0x5EED_C0DE),
             printed: Vec::new(),
         }
     }
@@ -504,7 +441,7 @@ impl Interp {
         self.depth -= 1;
         match r {
             Ok(Flow::Return(v)) => Ok(v),
-            Ok(Flow::Next) => Ok(Vec::new()),
+            Ok(Flow::Next | Flow::Break | Flow::Continue) => Ok(Vec::new()),
             Err(e) => Err(ScriptError(format!("{}: {}", fd.name, e.0))),
         }
     }
@@ -520,8 +457,9 @@ impl Interp {
             if self.steps > STEP_BUDGET {
                 return err("step budget exhausted");
             }
-            if let Flow::Return(v) = self.stmt(host, fr, s)? {
-                return Ok(Flow::Return(v));
+            match self.stmt(host, fr, s)? {
+                Flow::Next => {}
+                other => return Ok(other),
             }
         }
         Ok(Flow::Next)
@@ -581,8 +519,10 @@ impl Interp {
                 let mut i = start;
                 while if step > 0.0 { i <= limit } else { i >= limit } {
                     self.write_local(fr, *var, Value::Num(i));
-                    if let Flow::Return(v) = self.block(host, fr, body)? {
-                        return Ok(Flow::Return(v));
+                    match self.block(host, fr, body)? {
+                        Flow::Next | Flow::Continue => {}
+                        Flow::Break => break,
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
                     }
                     i = self.read_local(fr, *var).num().unwrap_or(i) + step;
                 }
@@ -601,8 +541,10 @@ impl Interp {
                                 break;
                             }
                             self.bind_iter(fr, vars, Value::Num(i), v);
-                            if let Flow::Return(v) = self.block(host, fr, body)? {
-                                return Ok(Flow::Return(v));
+                            match self.block(host, fr, body)? {
+                                Flow::Next | Flow::Continue => {}
+                                Flow::Break => break,
+                                Flow::Return(v) => return Ok(Flow::Return(v)),
                             }
                             i += 1.0;
                         }
@@ -619,8 +561,10 @@ impl Interp {
                                 continue;
                             }
                             self.bind_iter(fr, vars, k, v);
-                            if let Flow::Return(v) = self.block(host, fr, body)? {
-                                return Ok(Flow::Return(v));
+                            match self.block(host, fr, body)? {
+                                Flow::Next | Flow::Continue => {}
+                                Flow::Break => break,
+                                Flow::Return(v) => return Ok(Flow::Return(v)),
                             }
                         }
                     }
@@ -633,6 +577,19 @@ impl Interp {
                     }
                 }
             }
+            Stmt::Loop(body) => loop {
+                self.steps += 1;
+                if self.steps > STEP_BUDGET {
+                    return err("step budget exhausted");
+                }
+                match self.block(host, fr, body)? {
+                    Flow::Next | Flow::Continue => {}
+                    Flow::Break => break,
+                    Flow::Return(v) => return Ok(Flow::Return(v)),
+                }
+            },
+            Stmt::Break => return Ok(Flow::Break),
+            Stmt::Continue => return Ok(Flow::Continue),
         }
         Ok(Flow::Next)
     }
@@ -903,7 +860,7 @@ impl Interp {
                     .map_or(Value::Nil, Value::Table)],
                 _ => vec![Value::Nil],
             },
-            "table.insert" => {
+            "table.insert" | "tinsert" => {
                 let Value::Table(t) = arg(0) else {
                     return err("table.insert on a non-table");
                 };
@@ -924,7 +881,7 @@ impl Interp {
                 }
                 vec![]
             }
-            "table.remove" => {
+            "table.remove" | "tremove" => {
                 let Value::Table(t) = arg(0) else {
                     return err("table.remove on a non-table");
                 };
@@ -941,7 +898,7 @@ impl Interp {
                 self.raw_set(t, Value::Num(n as f32), Value::Nil);
                 vec![out]
             }
-            "table.getn" => match arg(0) {
+            "table.getn" | "getn" => match arg(0) {
                 Value::Table(t) => vec![Value::Num(self.getn(t) as f32)],
                 _ => return err("table.getn on a non-table"),
             },
@@ -982,7 +939,8 @@ impl Interp {
                     }
                 }
             }
-            "math.floor" | "math.ceil" | "math.abs" | "math.sqrt" => {
+            "math.floor" | "math.ceil" | "math.abs" | "math.sqrt" | "math.sin" | "math.cos"
+            | "math.tan" => {
                 let x = arg(0)
                     .num()
                     .ok_or_else(|| ScriptError(format!("{name}: number expected")))?;
@@ -990,8 +948,113 @@ impl Interp {
                     "math.floor" => x.floor(),
                     "math.ceil" => x.ceil(),
                     "math.abs" => x.abs(),
+                    "math.sin" => core::fmath::sin_cos(x).0,
+                    "math.cos" => core::fmath::sin_cos(x).1,
+                    "math.tan" => {
+                        let (s, c) = core::fmath::sin_cos(x);
+                        if c == 0.0 { 0.0 } else { s / c }
+                    }
                     _ => x.sqrt(),
                 })]
+            }
+            "math.mod" => {
+                let a = arg(0)
+                    .num()
+                    .ok_or_else(|| ScriptError("math.mod: number expected".into()))?;
+                let b = arg(1)
+                    .num()
+                    .ok_or_else(|| ScriptError("math.mod: number expected".into()))?;
+                vec![Value::Num(if b == 0.0 {
+                    0.0
+                } else {
+                    a - (a / b).trunc() * b
+                })]
+            }
+            "math.random" | "random" => {
+                let r = self.rng.next_rand() as u64;
+                let v = match args.len() {
+                    0 => (r as f32) / (u32::MAX as f32 + 1.0),
+                    1 => {
+                        let u = arg(0).num().unwrap_or(1.0).floor() as i64;
+                        if u < 1 {
+                            1.0
+                        } else {
+                            ((r % (u as u64)) + 1) as f32
+                        }
+                    }
+                    _ => {
+                        let l = arg(0).num().unwrap_or(1.0).floor() as i64;
+                        let u = arg(1).num().unwrap_or(l as f32).floor() as i64;
+                        if u <= l {
+                            l as f32
+                        } else {
+                            let span = (u - l + 1) as u64;
+                            (l + (r % span) as i64) as f32
+                        }
+                    }
+                };
+                vec![Value::Num(v)]
+            }
+            "math.randomseed" => {
+                let seed = arg(0).num().unwrap_or(1.0) as u32;
+                self.rng = core::rng::SimRng::new(seed);
+                vec![]
+            }
+            "string.find" => {
+                let s = self.show(&arg(0));
+                let pat = self.show(&arg(1));
+                let init = arg(2).num().map_or(1isize, |n| n.trunc() as isize);
+                let start = if init < 0 {
+                    (s.len() as isize + init).max(0) as usize
+                } else {
+                    init.saturating_sub(1).max(0) as usize
+                };
+                if start <= s.len() {
+                    if let Some(pos) = s[start..].find(&pat) {
+                        let a = start + pos + 1;
+                        let b = a + pat.len().saturating_sub(1);
+                        vec![Value::Num(a as f32), Value::Num(b as f32)]
+                    } else {
+                        vec![Value::Nil]
+                    }
+                } else {
+                    vec![Value::Nil]
+                }
+            }
+            "string.format" => {
+                let fmt = self.show(&arg(0));
+                let mut out = String::new();
+                let mut chars = fmt.chars().peekable();
+                let mut ai = 1usize;
+                while let Some(ch) = chars.next() {
+                    if ch != '%' {
+                        out.push(ch);
+                        continue;
+                    }
+                    match chars.next() {
+                        Some('%') => out.push('%'),
+                        Some('s') => {
+                            out.push_str(&self.show(&arg(ai)));
+                            ai += 1;
+                        }
+                        Some('d' | 'i') => {
+                            let n = arg(ai).num().unwrap_or(0.0).trunc() as i64;
+                            out.push_str(&n.to_string());
+                            ai += 1;
+                        }
+                        Some('f') => {
+                            let n = arg(ai).num().unwrap_or(0.0);
+                            out.push_str(&format!("{n:.6}"));
+                            ai += 1;
+                        }
+                        Some(other) => {
+                            out.push('%');
+                            out.push(other);
+                        }
+                        None => out.push('%'),
+                    }
+                }
+                vec![Value::str(&out)]
             }
             "math.min" | "math.max" => {
                 let mut best: Option<f32> = None;
@@ -1036,6 +1099,10 @@ fn is_lib(name: &str) -> bool {
             | "table"
             | "string"
             | "math"
+            | "random"
+            | "getn"
+            | "tinsert"
+            | "tremove"
             | "ScriptCB_DoFile"
     )
 }
@@ -1051,12 +1118,20 @@ pub fn is_lib_field(full: &str) -> bool {
             | "string.upper"
             | "string.len"
             | "string.sub"
+            | "string.find"
+            | "string.format"
             | "math.floor"
             | "math.ceil"
             | "math.abs"
             | "math.sqrt"
             | "math.min"
             | "math.max"
+            | "math.mod"
+            | "math.sin"
+            | "math.cos"
+            | "math.tan"
+            | "math.random"
+            | "math.randomseed"
     )
 }
 

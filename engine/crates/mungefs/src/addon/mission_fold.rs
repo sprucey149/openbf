@@ -578,6 +578,25 @@ pub(super) fn fold_calls(
                     m.music_defeat.push((t, mus.to_owned()));
                 }
             }
+            "SetClassProperty" => {
+                if let (Some(cls), Some(prop), Some(val)) = (
+                    a.first().and_then(|v| v.as_str()),
+                    a.get(1).and_then(|v| v.as_str()),
+                    a.get(2).and_then(|v| match v {
+                        LuaVal::Str(s) => Some(s.clone()),
+                        LuaVal::Num(n) => Some(if n.fract() == 0.0 {
+                            format!("{}", *n as i64)
+                        } else {
+                            format!("{n}")
+                        }),
+                        LuaVal::Bool(b) => Some(if *b { "1" } else { "0" }.into()),
+                        _ => None,
+                    }),
+                ) {
+                    m.class_properties
+                        .push((cls.to_owned(), prop.to_owned(), val));
+                }
+            }
             "AddCameraShot" => {
                 if a.len() >= 7 && m.camera_shots.len() < 16 {
                     if let Some(shot) = a[..7]
@@ -748,9 +767,7 @@ pub(super) fn fold_calls(
         m.mode = "con".into();
     } else if has_obj_assault {
         m.mode = "ass".into();
-        m.supported = false;
-        m.unsupported_reason =
-            Some("Custom scripted Assault objectives are not yet supported".into());
+        m.scripted_mode = true;
     } else if has_obj_tdm {
         let lower = script_name.to_ascii_lowercase();
         m.mode = if lower.ends_with("_hunt") {
@@ -760,27 +777,25 @@ pub(super) fn fold_calls(
         };
     } else {
         let lower = script_name.to_ascii_lowercase();
-        if lower.ends_with("_con") {
-            m.mode = "con".into();
-        } else if lower.ends_with("_ctf") {
-            m.mode = "ctf".into();
-            m.supported = false;
-            m.unsupported_reason = Some("CTF script did not declare ObjectiveCTF".into());
-        } else if lower.ends_with("_1flag") {
-            m.mode = "1flag".into();
-            m.supported = false;
-            m.unsupported_reason =
-                Some("One-Flag CTF script did not declare ObjectiveOneFlagCTF".into());
-        } else if lower.ends_with("_eli") {
-            m.mode = "eli".into();
-        } else if lower.ends_with("_hunt") {
-            m.mode = "hunt".into();
-        } else {
-            m.mode = "unknown".into();
-            m.supported = false;
-            m.unsupported_reason = Some(format!(
-                "Mission '{script_name}' uses an unrecognized custom game mode"
-            ));
+        let suffix = lower
+            .rsplit_once('_')
+            .map(|(_, s)| s)
+            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric()));
+        match suffix {
+            Some("con") => m.mode = "con".into(),
+            Some("eli") => m.mode = "eli".into(),
+            Some("hunt") => m.mode = "hunt".into(),
+            Some(custom) => {
+                m.mode = custom.to_owned();
+                m.scripted_mode = true;
+            }
+            None => {
+                m.mode = "unknown".into();
+                m.supported = false;
+                m.unsupported_reason = Some(format!(
+                    "Mission '{script_name}' uses an unrecognized custom game mode"
+                ));
+            }
         }
     }
 

@@ -339,6 +339,24 @@ pub struct ModCacheMeta {
     /// ([`replace::TargetSelections::for_mod`]).
     #[serde(default)]
     pub target_choices: BTreeMap<String, TargetChoice>,
+    /// Custom game mode metadata extracted from `addme.script` (`change.mode_*` tables),
+    /// keyed by lowercase mode suffix (e.g. `"ins"` -> V.I.P., `"vip_icon"`).
+    #[serde(default)]
+    pub custom_modes: BTreeMap<String, ModModeMeta>,
+    /// True when shell/mode icon KTX2s were baked into `assets/<namespace>__shell_icons/`.
+    #[serde(default)]
+    pub has_shell_icons: bool,
+}
+
+/// Optional display metadata for a mod-declared game mode (from `addme.script`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModModeMeta {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 impl ModCacheMeta {
@@ -744,6 +762,8 @@ mod tests {
             unsupported: Vec::new(),
             catalog_digest: catalog_digest.into(),
             target_choices: BTreeMap::new(),
+            custom_modes: BTreeMap::new(),
+            has_shell_icons: false,
         }
     }
 

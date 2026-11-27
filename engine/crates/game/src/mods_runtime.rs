@@ -21,7 +21,7 @@ use extensions::mods::{
 use extensions::profile::{mods_dir, profile_path, ExtensionProfile};
 use manifest::hud::HudLocl;
 use pak::{clear_overlays, set_overlays, OverlayLayer, OverlayRule};
-use ui::shell::{ModMapEntry, Mode, MODES};
+use ui::shell::{ModMapEntry, Mode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MountedMod {
@@ -47,6 +47,8 @@ pub struct MountedModsReport {
     pub disabled: bool,
     pub active: Vec<MountedMod>,
     pub mod_maps: Vec<ModMapEntry>,
+    pub custom_modes: BTreeMap<String, extensions::mods::ModModeMeta>,
+    pub shell_icon_dirs: Vec<PathBuf>,
     pub active_fingerprints: Vec<(String, String)>,
     pub override_digest: String,
     pub conflicts: Vec<ResourceOverrideConflict>,
@@ -58,6 +60,8 @@ static RUNTIME_STATE: RwLock<MountedModsReport> = RwLock::new(MountedModsReport 
     disabled: false,
     active: Vec::new(),
     mod_maps: Vec::new(),
+    custom_modes: BTreeMap::new(),
+    shell_icon_dirs: Vec::new(),
     active_fingerprints: Vec::new(),
     override_digest: String::new(),
     conflicts: Vec::new(),
@@ -71,6 +75,24 @@ pub fn active_mod_maps() -> Vec<ModMapEntry> {
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .mod_maps
+        .clone()
+}
+
+/// Snapshot of active mod-declared custom mode metadata (`addme.script` `change.mode_*`).
+pub fn active_custom_modes() -> BTreeMap<String, extensions::mods::ModModeMeta> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .custom_modes
+        .clone()
+}
+
+/// Directories containing baked custom shell/mode icon KTX2s from active mods (priority order).
+pub fn active_shell_icon_dirs() -> Vec<PathBuf> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .shell_icon_dirs
         .clone()
 }
 
@@ -323,10 +345,7 @@ pub fn convert_mod_with_bake(
 fn parse_modes_list(strs: &[String]) -> Vec<Mode> {
     let mut out = Vec::new();
     for s in strs {
-        if let Some(m) = MODES
-            .into_iter()
-            .find(|cand| cand.subst().eq_ignore_ascii_case(s))
-        {
+        if let Some(m) = Mode::from_subst(s) {
             if !out.contains(&m) {
                 out.push(m);
             }
@@ -667,6 +686,30 @@ pub fn mount_enabled_mods(
             });
         }
 
+        if meta.has_shell_icons {
+            let icon_dir = cache_dir
+                .join("assets")
+                .join(format!("{}__shell_icons", meta.namespace));
+            if icon_dir.is_dir() {
+                report.shell_icon_dirs.push(icon_dir);
+            }
+        }
+        for (mode_key, mode_meta) in &meta.custom_modes {
+            let entry_meta = report
+                .custom_modes
+                .entry(mode_key.to_ascii_lowercase())
+                .or_default();
+            if entry_meta.name.is_none() {
+                entry_meta.name = mode_meta.name.clone();
+            }
+            if entry_meta.description.is_none() {
+                entry_meta.description = mode_meta.description.clone();
+            }
+            if entry_meta.icon.is_none() {
+                entry_meta.icon = mode_meta.icon.clone();
+            }
+        }
+
         if meta.has_locl {
             let locl_path = cache_dir.join("locl").join("english.ron");
             if let Ok(text) = std::fs::read_to_string(&locl_path) {
@@ -858,6 +901,8 @@ mod tests {
             unsupported: Vec::new(),
             catalog_digest: StockCatalogs::digest_with(&|_| None),
             target_choices: BTreeMap::new(),
+            custom_modes: BTreeMap::new(),
+            has_shell_icons: false,
         };
         meta.save_atomic(&cache).unwrap();
     }
@@ -1126,6 +1171,8 @@ mod tests {
             unsupported: Vec::new(),
             catalog_digest: stock_catalog_digest(&assets),
             target_choices: BTreeMap::new(),
+            custom_modes: BTreeMap::new(),
+            has_shell_icons: false,
         };
         meta.save_atomic(&cache).unwrap();
 

@@ -64,8 +64,8 @@ impl Game {
 }
 
 /// `gMapModes` in screen order (con, ctf, 1flag, tdm, hunt, ass, eli; §6);
-/// no map has tdm, so it is left out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// no map has tdm, so it is left out. Mod-declared modes use [`Mode::Custom`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Mode {
     Con,
     Ctf,
@@ -74,6 +74,8 @@ pub enum Mode {
     Assault,
     Eli,
     Xl,
+    /// A mod-declared game mode (lowercase script suffix, e.g. `"ctrl"`, `"obj"`, `"wav"`).
+    Custom(String),
 }
 
 pub const MODES: [Mode; 7] = [
@@ -87,9 +89,32 @@ pub const MODES: [Mode; 7] = [
 ];
 
 impl Mode {
+    /// Parse a mission mode suffix into a built-in or mod-declared [`Mode`].
+    pub fn from_subst(subst: &str) -> Option<Mode> {
+        let low = subst.trim().to_ascii_lowercase();
+        if low.is_empty() || !low.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return None;
+        }
+        Some(match low.as_str() {
+            "con" => Mode::Con,
+            "ctf" => Mode::Ctf,
+            "1flag" => Mode::OneFlag,
+            "hunt" => Mode::Hunt,
+            "ass" => Mode::Assault,
+            "eli" => Mode::Eli,
+            "xl" => Mode::Xl,
+            _ => Mode::Custom(low),
+        })
+    }
+
+    /// Whether openbf can run this mode (all built-in `PORT_MODES` and translated mod modes).
+    pub fn is_supported(&self) -> bool {
+        matches!(self, Mode::Custom(_)) || PORT_MODES.contains(self)
+    }
+
     /// The mission name's suffix (`hot1g_con`), the port's mission files'
     /// too (`bf2_hot1_con.ron`).
-    pub fn subst(self) -> &'static str {
+    pub fn subst(&self) -> &str {
         match self {
             Mode::Con => "con",
             Mode::Ctf => "ctf",
@@ -98,12 +123,13 @@ impl Mode {
             Mode::Assault => "ass",
             Mode::Eli => "eli",
             Mode::Xl => "xl",
+            Mode::Custom(s) => s.as_str(),
         }
     }
 
     /// Name and description keys with the disc's English; eli shows as
     /// Assault (`modename.name.assault`, §6).
-    fn text(self) -> ((&'static str, &'static str), (&'static str, &'static str)) {
+    fn text(&self) -> ((&'static str, &'static str), (&'static str, &'static str)) {
         match self {
             Mode::Con => (
                 ("modename.name.con", "Conquest"),
@@ -154,18 +180,22 @@ impl Mode {
                     "XL\r\nDefeat enemy units to earn points. The first team to 350 wins.",
                 ),
             ),
+            Mode::Custom(_) => (("modename.name.custom", "Custom"), ("", "Custom mod game mode.")),
         }
     }
 
     /// The mode's name in the disc's English ("Conquest"; eli is Assault).
-    pub fn english(self) -> &'static str {
-        self.text().0 .1
+    pub fn english(&self) -> String {
+        match self {
+            Mode::Custom(s) => s.to_ascii_uppercase(),
+            other => other.text().0 .1.to_owned(),
+        }
     }
 
     /// The row's icon (SHELL.LVL, §6; eli draws Assault's).
-    pub fn icon(self) -> &'static str {
+    pub fn icon(&self) -> &'static str {
         match self {
-            Mode::Con => "mode_icon_con",
+            Mode::Con | Mode::Custom(_) => "mode_icon_con",
             Mode::Ctf => "mode_icon_2ctf",
             Mode::OneFlag => "mode_icon_ctf",
             Mode::Hunt => "mode_icon_hunt",
@@ -192,7 +222,7 @@ impl Side {
 }
 
 /// One playlist row (`gPickedMapList` minus "Remove All").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     /// An index into [`InstantAction::maps`].
     pub map: usize,
@@ -219,7 +249,7 @@ pub enum MapPick {
     All,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModePick {
     One(Mode),
     All,
@@ -426,7 +456,7 @@ pub struct ListRow {
     pub enabled: bool,
     /// The right-edge icon (a mode's, an era's) and the one left of it (a
     /// playlist row's era icon).
-    pub icon: Option<&'static str>,
+    pub icon: Option<String>,
     pub icon2: Option<&'static str>,
 }
 
@@ -774,24 +804,36 @@ impl InstantAction {
                     MapPick::All => self.texts.all_maps.clone(),
                 },
                 enabled: self.adds(p, ModePick::All, SidePick::AllEras)
-                    || self.mixed_adds(p, ModePick::All),
+                    || self.mixed_adds(p, &ModePick::All),
                 icon: None,
                 icon2: None,
             })
             .collect()
     }
 
-    fn mixed_adds(&self, map: MapPick, mode: ModePick) -> bool {
-        (0..MIXED.len()).any(|i| self.adds(map, mode, SidePick::One(Side::Mixed(i))))
+    fn mixed_adds(&self, map: MapPick, mode: &ModePick) -> bool {
+        (0..MIXED.len()).any(|i| self.adds(map, mode.clone(), SidePick::One(Side::Mixed(i))))
     }
 
-    /// The modes `map` has, in `gMapModes` order (All Maps: any map's).
+    /// The modes `map` has, in `gMapModes` order followed by mod-declared modes
+    /// (All Maps: any map's).
     fn modes_of(&self, map: MapPick) -> Vec<Mode> {
         let maps = self.maps_in(map);
-        MODES
+        let mut out: Vec<Mode> = MODES
             .into_iter()
             .filter(|m| maps.iter().any(|&i| self.maps[i].all_modes().contains(m)))
-            .collect()
+            .collect();
+        let mut custom: Vec<Mode> = Vec::new();
+        for &i in &maps {
+            for m in self.maps[i].all_modes() {
+                if matches!(m, Mode::Custom(_)) && !custom.contains(&m) {
+                    custom.push(m);
+                }
+            }
+        }
+        custom.sort_by(|a, b| a.subst().cmp(b.subst()));
+        out.extend(custom);
+        out
     }
 
     /// The Mode list: the map's modes, then "All Modes" when it has more
@@ -810,21 +852,21 @@ impl InstantAction {
         let picks = self.mode_picks();
         let live_modes = picks
             .iter()
-            .filter(|p| matches!(p, ModePick::One(_)) && self.mode_live(**p))
+            .filter(|p| matches!(p, ModePick::One(_)) && self.mode_live(p))
             .count();
         picks
             .iter()
-            .map(|&p| match p {
+            .map(|p| match p {
                 ModePick::One(m) => ListRow {
-                    text: if m == Mode::Hunt
+                    text: if *m == Mode::Hunt
                         && matches!(self.picked_map, MapPick::One(i) if self.maps[i].game == Game::Bf1)
                     {
                         format!("{} (openbf)", self.texts.mode(m).0)
                     } else {
-                        self.texts.mode(m).0.to_owned()
+                        self.texts.mode(m).0
                     },
                     enabled: self.mode_live(p),
-                    icon: Some(m.icon()),
+                    icon: Some(self.texts.mode_icon(m)),
                     icon2: None,
                 },
                 // §7: dimmed when only one mode is live.
@@ -838,8 +880,8 @@ impl InstantAction {
             .collect()
     }
 
-    fn mode_live(&self, mode: ModePick) -> bool {
-        self.adds(self.picked_map, mode, SidePick::AllEras)
+    fn mode_live(&self, mode: &ModePick) -> bool {
+        self.adds(self.picked_map, mode.clone(), SidePick::AllEras)
             || self.mixed_adds(self.picked_map, mode)
     }
 
@@ -852,8 +894,8 @@ impl InstantAction {
             let maps = self.maps_in(self.picked_map);
             maps.iter()
                 .map(|&i| &self.maps[i])
-                .any(|m| match self.picked_mode {
-                    ModePick::One(mode) => m.modes[e.index()].contains(&mode),
+                .any(|m| match &self.picked_mode {
+                    ModePick::One(mode) => m.modes[e.index()].contains(mode),
                     ModePick::All => m.has_era(e),
                 })
         };
@@ -867,7 +909,7 @@ impl InstantAction {
 
     pub fn side_rows(&self) -> Vec<ListRow> {
         let picks = self.side_picks();
-        let live = |p: SidePick| self.adds(self.picked_map, self.picked_mode, p);
+        let live = |p: SidePick| self.adds(self.picked_map, self.picked_mode.clone(), p);
         let live_eras = picks
             .iter()
             .filter(|p| matches!(p, SidePick::One(Side::Era(_))) && live(**p))
@@ -879,7 +921,7 @@ impl InstantAction {
                     text: self.texts.side(s),
                     enabled: live(p),
                     icon: match s {
-                        Side::Era(e) => Some(e.icon()),
+                        Side::Era(e) => Some(e.icon().to_owned()),
                         Side::Mixed(_) => None,
                     },
                     icon2: None,
@@ -905,13 +947,13 @@ impl InstantAction {
             icon2: None,
         })
         .chain(self.playlist.iter().map(|e| ListRow {
-            text: if e.mode == Mode::Xl {
-                format!("{} / {}", self.maps[e.map].label, self.texts.mode(e.mode).0)
+            text: if e.mode == Mode::Xl || matches!(e.mode, Mode::Custom(_)) {
+                format!("{} / {}", self.maps[e.map].label, self.texts.mode(&e.mode).0)
             } else {
                 self.maps[e.map].label.clone()
             },
             enabled: true,
-            icon: Some(e.mode.icon()),
+            icon: Some(self.texts.mode_icon(&e.mode)),
             icon2: match e.side {
                 Side::Era(era) => Some(era.icon()),
                 Side::Mixed(_) => None,
@@ -930,7 +972,7 @@ impl InstantAction {
         };
         let modes: Vec<Mode> = match mode {
             ModePick::One(m) => vec![m],
-            ModePick::All => MODES.to_vec(),
+            ModePick::All => self.modes_of(map),
         };
         let mut out = Vec::new();
         for &i in &maps {
@@ -941,11 +983,11 @@ impl InstantAction {
                         continue;
                     }
                 }
-                for &mode in &modes {
+                for mode in &modes {
                     if m.runnable(mode, s) {
                         out.push(Entry {
                             map: i,
-                            mode,
+                            mode: mode.clone(),
                             side: s,
                         });
                     }
@@ -987,7 +1029,7 @@ impl InstantAction {
                 _ => self.texts.all_maps_desc.clone(),
             },
             State::Mode => match self.mode_picks().get(at(&self.mode_list)) {
-                Some(ModePick::One(m)) => self.texts.mode(*m).1.to_owned(),
+                Some(ModePick::One(m)) => self.texts.mode(m).1,
                 _ => self.texts.all_modes_desc.clone(),
             },
             State::Era => match self.side_picks().get(at(&self.era_list)) {
@@ -1052,8 +1094,8 @@ impl InstantAction {
                 Launch {
                     key: m.key.clone(),
                     game: m.game,
-                    mode: e.mode,
-                    armies: m.launch_armies(e.mode, e.side),
+                    mode: e.mode.clone(),
+                    armies: m.launch_armies(&e.mode, e.side),
                     label: m.label.clone(),
                 }
             })

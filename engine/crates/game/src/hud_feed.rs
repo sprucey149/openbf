@@ -923,18 +923,22 @@ impl HudView {
             pass: None,
             format,
             display,
-            texture_dirs: vec![
-                common.join("textures"),
-                common.join("fonts"),
-                // The shell's own sheets (`logo`, card BSHLA).
-                crate::shell_movie::shell_dir(assets_dir).join("textures"),
-                bf1_fonts,
-                assets_dir.join("side_bf2/textures"),
-                assets_dir.join("side_bf2/locals/textures"),
-                assets_dir.join("common_bf1/textures"),
-                assets_dir.join("side_bf1/textures"),
-                assets_dir.join("side_bf1/locals/textures"),
-            ],
+            texture_dirs: {
+                let mut dirs = crate::mods_runtime::active_shell_icon_dirs();
+                dirs.extend([
+                    common.join("textures"),
+                    common.join("fonts"),
+                    // The shell's own sheets (`logo`, card BSHLA).
+                    crate::shell_movie::shell_dir(assets_dir).join("textures"),
+                    bf1_fonts,
+                    assets_dir.join("side_bf2/textures"),
+                    assets_dir.join("side_bf2/locals/textures"),
+                    assets_dir.join("common_bf1/textures"),
+                    assets_dir.join("side_bf1/textures"),
+                    assets_dir.join("side_bf1/locals/textures"),
+                ]);
+                dirs
+            },
             native_art: read_ron(&common.join("hud/native-art.ron")).unwrap_or_default(),
             common_textures: common.join("textures"),
             native_art_dir: common.join("hud/native-art"),

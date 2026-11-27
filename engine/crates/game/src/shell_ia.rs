@@ -83,10 +83,72 @@ fn catalog_action(
         &missions,
         &crate::mods_runtime::active_mod_maps(),
     );
-    let texts = IaTexts::new(&|key, english| {
+    let mut texts = IaTexts::new(&|key, english| {
         bf2.bf2_text(key)
             .map_or_else(|| english.to_owned(), |t| t.trim_end().to_owned())
     });
+    let custom_meta = crate::mods_runtime::active_custom_modes();
+    let mut icon_dirs = crate::mods_runtime::active_shell_icon_dirs();
+    icon_dirs.push(crate::shell_movie::shell_dir(assets_dir).join("textures"));
+    let has_icon = |name: &str| {
+        let fname = format!("{}.ktx2", name.to_ascii_lowercase());
+        icon_dirs.iter().any(|d| pak::is_file(d.join(&fname)))
+    };
+    let mut custom_seen = std::collections::BTreeSet::new();
+    for map in &maps {
+        for era_modes in &map.modes {
+            for mode in era_modes {
+                let Mode::Custom(s) = mode else { continue };
+                if !custom_seen.insert(s.clone()) {
+                    continue;
+                }
+                let meta = custom_meta.get(s);
+                let locl_name = bf2
+                    .bf2_text(&format!("modename.name.{s}"))
+                    .map(|t| t.trim().to_owned())
+                    .filter(|t| !t.is_empty());
+                let locl_desc = bf2
+                    .bf2_text(&format!("modename.description.{s}"))
+                    .map(|t| t.trim_end().to_owned())
+                    .filter(|t| !t.is_empty());
+                let name = meta
+                    .and_then(|m| m.name.clone())
+                    .or(locl_name)
+                    .or_else(|| {
+                        locl_desc
+                            .as_deref()
+                            .and_then(|d| d.lines().next())
+                            .map(|l| l.trim().to_owned())
+                            .filter(|l| !l.is_empty())
+                    })
+                    .unwrap_or_else(|| s.to_ascii_uppercase());
+                let desc = locl_desc
+                    .or_else(|| {
+                        meta.and_then(|m| m.description.as_deref())
+                            .map(|d| format!("{name}\r\n{d}"))
+                    })
+                    .unwrap_or_else(|| format!("{name}\r\nCustom mod game mode."));
+                let mut icon_candidates: Vec<String> = Vec::new();
+                if let Some(ic) = meta.and_then(|m| m.icon.as_deref()) {
+                    icon_candidates.push(ic.to_ascii_lowercase());
+                }
+                icon_candidates.push(format!("mode_icon_{s}"));
+                let name_slug: String = name
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric())
+                    .map(|c| c.to_ascii_lowercase())
+                    .collect();
+                if !name_slug.is_empty() {
+                    icon_candidates.push(format!("mode_icon_{name_slug}"));
+                }
+                let icon = icon_candidates
+                    .into_iter()
+                    .find(|cand| has_icon(cand))
+                    .unwrap_or_else(|| "mode_icon_con".to_owned());
+                texts.set_custom_mode(s, name, desc, icon);
+            }
+        }
+    }
     let dlc_heroes_installed = crate::dlc::installed(assets_dir);
     let options = SessionOptions {
         difficulty: ia_level(difficulty),
@@ -133,7 +195,7 @@ mod tests {
         let hoth = ia.maps.iter().find(|m| m.label == "Hoth (bf2)").unwrap();
         assert_eq!(hoth.key, "bf2_hot1");
         assert!(hoth.description.starts_with("Hoth: Echo Base"));
-        assert!(hoth.runnable(Mode::Con, ui::shell::Side::Era(ui::shell::Era::Gcw)));
+        assert!(hoth.runnable(&Mode::Con, ui::shell::Side::Era(ui::shell::Era::Gcw)));
         let dune = ia
             .maps
             .iter()
