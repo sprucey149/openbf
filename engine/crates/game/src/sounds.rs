@@ -1045,8 +1045,9 @@ impl SoundLib {
                     || pak::is_dir(p.join("common_bf2"))
             })
             .unwrap_or_else(|| Path::new("assets_baked"));
-        let mut fallback_dir: Option<PathBuf> = None;
-        let mut fallback_bank: Option<Bank> = None;
+        // One stock bank per read that names one, in script order: a script
+        // reads several, and its music and effects may be any of theirs.
+        let mut fallbacks: Vec<(PathBuf, Bank)> = Vec::new();
         for (planet, sublevel) in sound_banks {
             let p = planet.to_ascii_lowercase();
             let sub_low = sublevel.to_ascii_lowercase();
@@ -1056,6 +1057,8 @@ impl SoundLib {
                 .trim_end_matches('_');
             let candidates = [
                 format!("bf2_{sub_stem}"),
+                // A bake directory named by the stem itself (`tat2`).
+                sub_stem.to_owned(),
                 format!("bf2_{p}1"),
                 format!("bf2_{p}2"),
                 format!("bf2_{p}3"),
@@ -1064,40 +1067,24 @@ impl SoundLib {
                 format!("{p}2"),
             ];
             for cand in candidates {
-                let sdir = root.join(&cand).join("sounds");
-                if let Some(bank) = Bank::load(&sdir) {
-                    fallback_dir = Some(root.join(cand));
-                    fallback_bank = Some(bank);
+                let dir = root.join(cand);
+                if fallbacks.iter().any(|(d, _)| *d == dir) {
+                    break;
+                }
+                if let Some(bank) = Bank::load(&dir.join("sounds")) {
+                    fallbacks.push((dir, bank));
                     break;
                 }
             }
-            if fallback_bank.is_some() {
-                break;
-            }
         }
         if let Some(mut local) = local {
-            if let (Some(bank), Some(dir)) = (fallback_bank, fallback_dir) {
-                let mut names: Vec<_> = bank.props.keys().copied().collect();
-                names.sort_unstable();
-                local.map.import_props_with(&bank, &mut names, true);
-                for (name, record) in bank.music {
-                    local.map.music.entry(name).or_insert(record);
-                }
-                let dir = dir.join("sounds/streams");
-                let index = read_index(&dir.join("streams.ron"));
-                note_indexed(&index, &mut local.indexed);
-                note_music(&index, &dir, &mut local.music_takes);
-                for (id, rel) in index.files {
-                    if let Ok(path) = std::path::absolute(dir.join(rel)) {
-                        local
-                            .map_stream_files
-                            .entry(id)
-                            .or_insert_with(|| path.to_string_lossy().into_owned());
-                    }
-                }
+            for (dir, bank) in fallbacks {
+                local.import_stock_bank(&dir, bank);
             }
             return Some(local);
         }
+        let mut fallbacks = fallbacks.into_iter();
+        let (fallback_dir, fallback_bank) = fallbacks.next().unzip();
         let mut core = Bank::load(&root.join(format!("core_{game}")).join("sounds"));
         if let Some(core_bank) = &mut core {
             core_bank.import_sbd_sounds(root, &game);
@@ -1128,7 +1115,7 @@ impl SoundLib {
         let m = read_index(&map_streams_dir.join("streams.ron"));
         note_indexed(&m, &mut indexed);
         note_music(&m, &map_streams_dir, &mut music_takes);
-        Some(SoundLib {
+        let mut lib = SoundLib {
             map,
             levels: fallback_dir
                 .as_deref()
@@ -1166,7 +1153,33 @@ impl SoundLib {
             buses: bus_table(&game),
             effects_volume: 1.0,
             dialogue_volume: 1.0,
-        })
+        };
+        for (dir, bank) in fallbacks {
+            lib.import_stock_bank(&dir, bank);
+        }
+        Some(lib)
+    }
+
+    /// Add the stock bake at `dir`: what its `bank` has and this library
+    /// lacks (properties, `Music` records, its own streams).
+    fn import_stock_bank(&mut self, dir: &Path, bank: Bank) {
+        let mut names: Vec<_> = bank.props.keys().copied().collect();
+        names.sort_unstable();
+        self.map.import_props_with(&bank, &mut names, true);
+        for (name, record) in bank.music {
+            self.map.music.entry(name).or_insert(record);
+        }
+        let dir = dir.join("sounds/streams");
+        let index = read_index(&dir.join("streams.ron"));
+        note_indexed(&index, &mut self.indexed);
+        note_music(&index, &dir, &mut self.music_takes);
+        for (id, rel) in index.files {
+            if let Ok(path) = std::path::absolute(dir.join(rel)) {
+                self.map_stream_files
+                    .entry(id)
+                    .or_insert_with(|| path.to_string_lossy().into_owned());
+            }
+        }
     }
 
     /// The BF2 shell's library (`common_bf2/shell`, its music and VO) with
