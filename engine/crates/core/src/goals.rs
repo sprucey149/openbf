@@ -1248,13 +1248,6 @@ pub fn defend_look(sim: &Sim, h: UnitHandle) -> Option<Vec3> {
     (hold.state == HoldState::Look).then_some(hold.gaze)
 }
 
-/// Where unit `h`'s Defend hint is and the stances it allows.
-pub fn defend_hint(sim: &Sim, h: UnitHandle) -> Option<(Vec3, u8)> {
-    let k = sim.ai_goals.hint_of(h)?;
-    let hint = sim.nav.as_ref()?.hints.get(k as usize)?;
-    Some((hint.pos, hint.stance_mask))
-}
-
 /// Where a Defend member holds: the post, the player, the station, the
 /// object or the flag; a CTFOffense goal's region.
 pub fn target_pos(sim: &Sim, t: GoalTarget) -> Option<Vec3> {

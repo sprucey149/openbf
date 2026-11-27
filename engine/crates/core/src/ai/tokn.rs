@@ -208,12 +208,20 @@ fn placed(sim: &Sim, bot: UnitHandle, human: UnitHandle) -> Option<f32> {
 /// shooters (an expired holder keeps his with nobody else waiting).
 pub fn deal(sim: &mut Sim) {
     super::dfocus::upkeep(sim);
+    let tokens = std::mem::take(&mut sim.tokens);
+    // Every human times every unit asks its team's DTEAM row (`governed`):
+    // held for this read-only pass (`Sim::with_team_rows_cached`).
+    sim.tokens = sim.with_team_rows_cached(|sim| dealt(sim, tokens));
+}
+
+/// [`deal`]'s pass over the unmoved sim, with its tokens taken out: the
+/// tokens it keeps, moves and adds.
+fn dealt(sim: &Sim, mut tokens: Vec<Token>) -> Vec<Token> {
     let humans: Vec<(UnitHandle, Budget)> = sim
         .alive_units()
         .filter(|(_, u)| u.is_human())
         .map(|(h, u)| (h, budget_against(sim, u.team)))
         .collect();
-    let mut tokens = std::mem::take(&mut sim.tokens);
     tokens.retain(|t| {
         humans
             .iter()
@@ -259,7 +267,7 @@ pub fn deal(sim: &mut Sim) {
             });
         }
     }
-    sim.tokens = tokens;
+    tokens
 }
 
 #[cfg(test)]

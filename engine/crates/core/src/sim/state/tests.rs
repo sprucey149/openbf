@@ -627,6 +627,41 @@ fn a_human_proxy_counts_as_its_teams_human() {
     assert_eq!(s.humans_per_team(), [0, 1]);
 }
 
+/// The DTEAM rows held for a read-only pass are the rows read without it,
+/// on every tier and head count (a proxy and extra humans included), and
+/// they are gone once the pass returns.
+#[test]
+fn team_rows_held_for_a_pass_match_a_fresh_read() {
+    use crate::skill::Difficulty as D;
+    for d in D::ALL {
+        for extra in [[0, 0], [1, 0], [2, 1], [0, 3]] {
+            let mut s = Sim::empty(3);
+            s.difficulty = d;
+            s.extra_humans = extra;
+            let h = s
+                .spawn(&crate::unit::UnitSpec::trooper(1, glam::Vec3::ZERO))
+                .unwrap();
+            s.units[h.index as usize].proxy_human =
+                Some(crate::ai::proxy::Strength::Good.profile());
+            let fresh = (
+                s.team_rows(),
+                s.humans_per_team(),
+                [0u8, 1, 2].map(|t| s.ai_tier(t).reaction_ticks),
+            );
+            let held = s.with_team_rows_cached(|s| {
+                assert!(s.team_rows_cache.is_some());
+                (
+                    s.team_rows(),
+                    s.humans_per_team(),
+                    [0u8, 1, 2].map(|t| s.ai_tier(t).reaction_ticks),
+                )
+            });
+            assert_eq!(held, fresh, "{d:?} {extra:?}");
+            assert!(s.team_rows_cache.is_none());
+        }
+    }
+}
+
 #[test]
 fn shared_sprint_keeps_hero_energy_nonnegative_but_soldiers_take_debt() {
     use crate::sim::buttons;

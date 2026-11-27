@@ -24,9 +24,13 @@
 //!   particles, foliage; none exist yet, issues #93 and #128). Steps down go
 //!   down the ladder and steps up come back the same way.
 //! - CPU-bound frames step nothing: when the frame's own work without the
-//!   wait for the display (the caller's `busy_ms`) is over budget too, a
-//!   smaller picture would not help, only blur it (a host whose sim and
-//!   bots fill the frame). The note says "CPU-bound" instead.
+//!   wait for the display (the caller's `busy_ms`) is over budget too, and
+//!   the frame hardly waits for the display's image (the caller's
+//!   `wait_ms`, its p95 at most [`WAIT_SHARE`] × budget), a smaller picture
+//!   would not help, only blur it (a host whose sim and bots fill the
+//!   frame). The note says "CPU-bound" instead. A frame that is over budget
+//!   on the CPU and still waits for the image has the GPU as part of its
+//!   limit, and steps down as a GPU-bound one does.
 //! - The first [`WARMUP_S`] seconds of a battle do not count: its first
 //!   frames upload what the loading left. [`Governor::restart`] starts a new
 //!   battle's warm-up and keeps the level it learned.
@@ -62,6 +66,20 @@ pub const WARMUP_S: f32 = 4.0;
 /// A single frame counts as at most this long: an alt-tab or a disk stall
 /// is one late frame, not a measure of the GPU.
 const SAMPLE_CAP_MS: f32 = 250.0;
+/// A wait-for-the-image p95 above budget × this means the GPU is part of
+/// the frame's limit (module rules, CPU-bound). OURS, PROVISIONAL, measure:
+/// set from littlemallard's headless pipelined bench, which has no vsync and
+/// whose wait is for a frame in flight, not the window's acquire. There a
+/// frame paced by its own work alone waits next to nothing (kas2 XL four
+/// views: p95 under 0.01 ms) and one the GPU holds back waits several ms
+/// (Mustafar four views: p95 8 ms). Untested under the window's Fifo: a
+/// CPU-bound frame over budget that the swapchain paces to the next vblank
+/// may wait in the acquire too, which this rule would read as the GPU's. A
+/// windowed round with `OPENBF_FRAME_PROFILE` (acquire p95 on Mustafar and
+/// kas2 XL four views) decides it.
+pub const WAIT_SHARE: f32 = 0.25;
+/// The CPU-bound summary's period ([`Note::CpuBound`]).
+pub const SUMMARY_S: f32 = 60.0;
 
 /// The graphics tiers' side of the ladder (issues #93 and #128). A tier
 /// implementation reports how many steps below the player's chosen tier it
@@ -111,14 +129,86 @@ impl Quality {
     }
 }
 
+/// What the governor did, for the session log ([`Governor::take_notes`]):
+/// a step, a failed step up and, at most once a [`SUMMARY_S`], how long the
+/// frames were CPU-bound. Nothing per window, so the log cannot flap.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Note {
+    /// The level changed: the quality now, its steps down the ladder, and
+    /// the window that decided it.
+    Step {
+        quality: Quality,
+        steps: usize,
+        p95: f32,
+        window: Window,
+    },
+    /// A step up on trial at `quality` went over budget and stepped back.
+    FailedUp { quality: Quality, p95: f32 },
+    /// Of the last `period_s` seconds of counted frames, `seconds` were in
+    /// CPU-bound windows; the window then.
+    CpuBound {
+        seconds: f32,
+        period_s: f32,
+        p95: f32,
+        window: Window,
+    },
+}
+
+/// The window's busy and wait p95s, when the caller gave them.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Window {
+    pub busy_p95: Option<f32>,
+    pub wait_p95: Option<f32>,
+}
+
+fn ms(v: Option<f32>) -> String {
+    v.map_or_else(|| "-".to_owned(), |v| format!("{v:.1}"))
+}
+
+impl Note {
+    /// The session log's line, `map` and `views` the battle's.
+    pub fn line(&self, map: &str, views: usize) -> String {
+        match self {
+            Note::Step {
+                quality,
+                steps,
+                p95,
+                window,
+            } => format!(
+                "quality: map {map} views {views} scale {:.2} tier -{} steps {steps} cpu_bound {} p95 {p95:.1} busy p95 {} wait p95 {}",
+                quality.scale,
+                quality.tier_down,
+                quality.cpu_bound,
+                ms(window.busy_p95),
+                ms(window.wait_p95)
+            ),
+            Note::FailedUp { quality, p95 } => format!(
+                "quality: map {map} views {views} step up to scale {:.2} tier -{} failed, p95 {p95:.1}",
+                quality.scale, quality.tier_down
+            ),
+            Note::CpuBound {
+                seconds,
+                period_s,
+                p95,
+                window,
+            } => format!(
+                "quality: map {map} views {views} cpu_bound {seconds:.0} of {period_s:.0} s, p95 {p95:.1} busy p95 {} wait p95 {}",
+                ms(window.busy_p95),
+                ms(window.wait_p95)
+            ),
+        }
+    }
+}
+
 /// The governor (module rules).
 #[derive(Debug, Clone)]
 pub struct Governor {
     /// Steps down the ladder: `0..SCALES.len()` are scales, beyond that
     /// tier steps at the lowest scale.
     level: usize,
-    /// (seconds since the window began, frame ms, busy ms), oldest first.
-    samples: VecDeque<(f32, f32, Option<f32>)>,
+    /// (seconds since the window began, frame ms, busy ms, wait ms),
+    /// oldest first.
+    samples: VecDeque<(f32, f32, Option<f32>, Option<f32>)>,
     /// Seconds of frames since the last change (or the restart).
     clock: f32,
     /// Seconds of frames the warm-up still ignores.
@@ -129,6 +219,13 @@ pub struct Governor {
     hold: f32,
     failures: u32,
     cpu_bound: bool,
+    /// The quality on trial, while a step up is.
+    trial: Option<Quality>,
+    /// Counted seconds since the last CPU-bound summary, and of them the
+    /// CPU-bound ones.
+    summary_s: f32,
+    cpu_bound_s: f32,
+    notes: Vec<Note>,
 }
 
 impl Default for Governor {
@@ -143,6 +240,10 @@ impl Default for Governor {
             hold: 0.0,
             failures: 0,
             cpu_bound: false,
+            trial: None,
+            summary_s: 0.0,
+            cpu_bound_s: 0.0,
+            notes: Vec::new(),
         }
     }
 }
@@ -155,6 +256,14 @@ impl Governor {
         self.warmup = WARMUP_S;
         self.headroom_s = 0.0;
         self.probing = None;
+        self.trial = None;
+        self.summary_s = 0.0;
+        self.cpu_bound_s = 0.0;
+    }
+
+    /// What it did since the last call (the session log's lines, [`Note`]).
+    pub fn take_notes(&mut self) -> Vec<Note> {
+        std::mem::take(&mut self.notes)
     }
 
     /// The level now, 0 = full quality.
@@ -182,19 +291,25 @@ impl Governor {
         p95(self.samples.iter().map(|s| s.1).collect())
     }
 
-    /// The p95 of the window's busy times, when the caller gave them.
-    fn busy_p95(&self) -> Option<f32> {
-        p95(self.samples.iter().filter_map(|s| s.2).collect())
+    /// The p95s of the window's busy and wait times, when the caller gave
+    /// them.
+    fn window(&self) -> Window {
+        Window {
+            busy_p95: p95(self.samples.iter().filter_map(|s| s.2).collect()),
+            wait_p95: p95(self.samples.iter().filter_map(|s| s.3).collect()),
+        }
     }
 
     /// One frame of `dt_ms` held to `budget_ms`, with `tier_steps` tier
     /// steps on the ladder below the scales. `busy_ms`: the frame's own work
-    /// without its wait for the display, when known (module rules). Returns
+    /// without its wait for the display, and `wait_ms` that wait (the
+    /// acquire of the window's image), when known (module rules). Returns
     /// the quality to draw the next frame at.
     pub fn frame(
         &mut self,
         dt_ms: f32,
         busy_ms: Option<f32>,
+        wait_ms: Option<f32>,
         budget_ms: f32,
         tier_steps: usize,
     ) -> Quality {
@@ -210,7 +325,8 @@ impl Governor {
         }
         self.clock += dt;
         let busy = busy_ms.map(|b| b.clamp(0.0, dt_ms));
-        self.samples.push_back((self.clock, dt_ms, busy));
+        let wait = wait_ms.map(|w| w.clamp(0.0, dt_ms));
+        self.samples.push_back((self.clock, dt_ms, busy, wait));
         while self
             .samples
             .front()
@@ -222,21 +338,35 @@ impl Governor {
             *p += dt;
             if *p > PROBE_S {
                 self.probing = None;
+                self.trial = None;
                 self.failures = 0;
             }
         }
         let Some(p95) = self.p95() else {
             return self.quality(tier_steps);
         };
+        // This frame's window was over budget and CPU-bound (the summary
+        // counts these only, not the band after one).
+        let mut cpu_bound_now = false;
         if p95 > budget_ms * OVER {
             self.headroom_s = 0.0;
-            self.cpu_bound = self.busy_p95().is_some_and(|b| b > budget_ms * OVER);
+            let window = self.window();
+            // Over on the CPU, and the image hardly waited for: the GPU is
+            // not part of the limit (module rules).
+            let busy_over = window.busy_p95.is_some_and(|b| b > budget_ms * OVER);
+            let gpu_waits = window.wait_p95.is_some_and(|w| w > budget_ms * WAIT_SHARE);
+            self.cpu_bound = busy_over && !gpu_waits;
+            cpu_bound_now = self.cpu_bound;
             if self.level < floor && !self.cpu_bound {
                 self.level += 1;
                 if self.probing.take().is_some() {
                     self.failures += 1;
                     self.hold = (1..self.failures).fold(HOLD_S, |h, _| (h * 2.0).fmin(HOLD_MAX_S));
+                    if let Some(quality) = self.trial.take() {
+                        self.notes.push(Note::FailedUp { quality, p95 });
+                    }
                 }
+                self.step_note(tier_steps, p95, window);
                 self.changed();
             }
         } else if p95 <= budget_ms * HEADROOM {
@@ -245,12 +375,40 @@ impl Governor {
             if self.headroom_s >= UP_AFTER_S && self.level > 0 && self.hold == 0.0 {
                 self.level -= 1;
                 self.probing = Some(0.0);
+                self.trial = Some(self.quality(tier_steps));
+                self.step_note(tier_steps, p95, self.window());
                 self.changed();
             }
         } else {
             self.headroom_s = 0.0;
         }
+        // The CPU-bound summary, at most once a period.
+        self.summary_s += dt;
+        if cpu_bound_now {
+            self.cpu_bound_s += dt;
+        }
+        if self.summary_s >= SUMMARY_S {
+            if self.cpu_bound_s > 0.0 {
+                self.notes.push(Note::CpuBound {
+                    seconds: self.cpu_bound_s,
+                    period_s: self.summary_s,
+                    p95,
+                    window: self.window(),
+                });
+            }
+            self.summary_s = 0.0;
+            self.cpu_bound_s = 0.0;
+        }
         self.quality(tier_steps)
+    }
+
+    fn step_note(&mut self, tier_steps: usize, p95: f32, window: Window) {
+        self.notes.push(Note::Step {
+            quality: self.quality(tier_steps),
+            steps: self.level,
+            p95,
+            window,
+        });
     }
 
     /// A step: the next decision waits for a full window of new frames.
@@ -259,6 +417,16 @@ impl Governor {
         self.clock = 0.0;
         self.headroom_s = 0.0;
     }
+}
+
+/// The battle's name in the session log's lines: the map's directory and
+/// " xl" for the XL population (`bf2_kas2 xl`), the same in the window and
+/// the bench.
+pub fn map_label(dir: &std::path::Path, map: &str, xl: bool) -> String {
+    let name = dir
+        .file_name()
+        .map_or_else(|| map.to_owned(), |n| n.to_string_lossy().into_owned());
+    format!("{name}{}", if xl { " xl" } else { "" })
 }
 
 /// The 95th percentile of `v`, `None` when empty.
@@ -284,7 +452,7 @@ mod tests {
         let mut out = Vec::new();
         let mut level = g.level();
         while t < seconds {
-            g.frame(ms, None, BUDGET, tiers);
+            g.frame(ms, None, None, BUDGET, tiers);
             t += ms / 1000.0;
             if g.level() != level {
                 level = g.level();
@@ -314,7 +482,7 @@ mod tests {
         let mut t = 0.0;
         for i in 0..36_000 {
             let ms = if i % 10 == 0 { 19.0 } else { BUDGET };
-            g.frame(ms, None, BUDGET, 2);
+            g.frame(ms, None, None, BUDGET, 2);
             t += ms;
             assert_eq!(g.level(), 0, "at {t} ms");
         }
@@ -352,7 +520,7 @@ mod tests {
         let mut g = Governor::default();
         run(&mut g, 0, WARMUP_S + 5.0, BUDGET);
         for _ in 0..5 {
-            g.frame(120.0, None, BUDGET, 0);
+            g.frame(120.0, None, None, BUDGET, 0);
         }
         assert!(run(&mut g, 0, 30.0, BUDGET).is_empty());
     }
@@ -388,7 +556,7 @@ mod tests {
         while t < 600.0 {
             // Full scale costs 22 ms a frame, anything lower fits in 15.
             let ms = if g.level() == 0 { 22.0 } else { 15.0 };
-            g.frame(ms, None, BUDGET, 0);
+            g.frame(ms, None, None, BUDGET, 0);
             t += ms / 1000.0;
             if g.level() != level {
                 level = g.level();
@@ -422,7 +590,7 @@ mod tests {
         let mut g = Governor::default();
         run(&mut g, 0, WARMUP_S, BUDGET);
         while g.level() == 0 {
-            g.frame(40.0, None, BUDGET, 0);
+            g.frame(40.0, None, None, BUDGET, 0);
         }
         run(&mut g, 0, UP_AFTER_S + WINDOW_S + PROBE_S + 1.0, BUDGET);
         assert_eq!((g.level(), g.failures, g.probing), (0, 0, None));
@@ -448,7 +616,7 @@ mod tests {
         run(&mut g, 3, WARMUP_S, BUDGET);
         run(&mut g, 3, 60.0, 40.0);
         assert_eq!(g.level(), 7);
-        g.frame(BUDGET, None, BUDGET, 0);
+        g.frame(BUDGET, None, None, BUDGET, 0);
         assert_eq!(g.level(), SCALES.len() - 1);
         assert_eq!(g.quality(0).scale, *SCALES.last().unwrap());
     }
@@ -476,19 +644,104 @@ mod tests {
     fn cpu_bound_frames_keep_the_picture() {
         let mut g = Governor::default();
         for _ in 0..240 {
-            g.frame(BUDGET, Some(5.0), BUDGET, 0);
+            g.frame(BUDGET, Some(5.0), Some(BUDGET - 5.0), BUDGET, 0);
         }
         for _ in 0..1500 {
-            g.frame(40.0, Some(38.0), BUDGET, 0);
+            g.frame(40.0, Some(38.0), Some(2.0), BUDGET, 0);
         }
         assert_eq!(g.level(), 0);
         assert!(g.quality(0).cpu_bound);
         assert_eq!(g.quality(0).label(), "res 100%, CPU-bound");
-        // One window of light work: one step, and the next waits its window.
-        for _ in 0..120 {
-            g.frame(40.0, Some(8.0), BUDGET, 0);
+        // Light work that waits for the image: one step as soon as the wait
+        // reaches the window's p95, and the next waits its own window.
+        for _ in 0..60 {
+            g.frame(40.0, Some(8.0), Some(32.0), BUDGET, 0);
         }
         assert_eq!(g.level(), 1);
         assert!(!g.quality(0).cpu_bound);
+    }
+
+    /// Over budget on the CPU and still waiting for the image (a synthetic
+    /// mixed case, not a measured map: the GPU is part of the limit): a step
+    /// down, not "CPU-bound".
+    #[test]
+    fn cpu_over_with_a_gpu_wait_steps_down() {
+        let mut g = Governor::default();
+        for _ in 0..240 {
+            g.frame(BUDGET, Some(5.0), Some(BUDGET - 5.0), BUDGET, 0);
+        }
+        for _ in 0..120 {
+            g.frame(33.0, Some(24.0), Some(9.0), BUDGET, 0);
+        }
+        assert_eq!(g.level(), 1);
+        assert!(!g.quality(0).cpu_bound);
+    }
+
+    /// The session log's notes: one per step, one per failed step up, and
+    /// the CPU-bound summary at most once a minute.
+    #[test]
+    fn notes_name_each_step_and_failed_trial_once() {
+        let mut g = Governor::default();
+        run(&mut g, 0, WARMUP_S, BUDGET);
+        assert!(g.take_notes().is_empty());
+        while g.level() == 0 {
+            g.frame(40.0, Some(10.0), Some(30.0), BUDGET, 0);
+        }
+        let notes = g.take_notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        let Note::Step {
+            quality,
+            steps,
+            window,
+            ..
+        } = &notes[0]
+        else {
+            panic!("{notes:?}");
+        };
+        assert_eq!((quality.scale, *steps), (0.85, 1));
+        assert_eq!(window.busy_p95, Some(10.0));
+        assert_eq!(window.wait_p95, Some(30.0));
+        assert_eq!(
+            notes[0].line("bf2_kas2 xl", 4),
+            "quality: map bf2_kas2 xl views 4 scale 0.85 tier -0 steps 1 cpu_bound false p95 40.0 busy p95 10.0 wait p95 30.0"
+        );
+        // Headroom: a trial up to 1.0, which fails.
+        while g.level() == 1 {
+            g.frame(10.0, None, None, BUDGET, 0);
+        }
+        assert_eq!(g.take_notes().len(), 1);
+        while g.level() == 0 {
+            g.frame(40.0, None, None, BUDGET, 0);
+        }
+        let notes = g.take_notes();
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert_eq!(
+            notes[0],
+            Note::FailedUp {
+                quality: Quality {
+                    scale: 1.0,
+                    tier_down: 0,
+                    cpu_bound: false,
+                },
+                p95: 40.0
+            }
+        );
+        assert_eq!(
+            notes[0].line("bf2_mus1", 4),
+            "quality: map bf2_mus1 views 4 step up to scale 1.00 tier -0 failed, p95 40.0"
+        );
+        assert!(matches!(notes[1], Note::Step { steps: 1, .. }));
+        // Ten minutes CPU-bound: ten summaries, nothing else.
+        let mut t = 0.0;
+        let mut summaries = 0;
+        while t < 600.0 {
+            g.frame(40.0, Some(38.0), Some(2.0), BUDGET, 0);
+            t += 0.04;
+            for n in g.take_notes() {
+                assert!(matches!(n, Note::CpuBound { .. }), "{n:?}");
+                summaries += 1;
+            }
+        }
+        assert!((9..=10).contains(&summaries), "{summaries}");
     }
 }

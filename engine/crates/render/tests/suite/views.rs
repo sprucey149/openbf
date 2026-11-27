@@ -144,3 +144,107 @@ fn a_views_overlay_gets_the_views_size() {
     }
     assert_eq!(seen, vec![[N / 2, N], [N / 2, N]]);
 }
+
+/// The present's wait for the window's image is its first view's: the later views of a split
+/// present take the held image and leave `acquire_ms` alone (the quality governor reads it), and
+/// a one-view present writes its own.
+#[test]
+#[ignore = "requires a GPU adapter (run with --ignored on the NVIDIA box)"]
+fn acquire_ms_is_the_first_views_wait() {
+    const WAIT_MS: f64 = 20.0;
+    let mut r = headless();
+    let cell = N / 2;
+    let cells = [[0, 0], [cell, 0], [0, cell], [cell, cell]];
+    r.acquire_delay = Some(std::time::Duration::from_secs_f64(WAIT_MS / 1000.0));
+    for (i, at) in cells.iter().enumerate() {
+        r.render_view(
+            slot([at[0], at[1], cell, cell], i == 0, i == 3),
+            &Camera::default(),
+            &[],
+            &[],
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+        )
+        .expect("view");
+        let ms = r.acquire_ms();
+        assert!(
+            (WAIT_MS..WAIT_MS + 15.0).contains(&ms),
+            "after view {i}: {ms} ms"
+        );
+    }
+    // One view is its present's first: it writes its own wait, once.
+    r.acquire_delay = None;
+    r.render(&Camera::default(), &[], [0.0, 0.0, 0.0, 1.0])
+        .expect("frame");
+    assert!(r.acquire_ms() < WAIT_MS / 2.0, "{} ms", r.acquire_ms());
+    r.acquire_delay = Some(std::time::Duration::from_secs_f64(WAIT_MS / 1000.0));
+    r.render(&Camera::default(), &[], [0.0, 0.0, 0.0, 1.0])
+        .expect("frame");
+    let ms = r.acquire_ms();
+    assert!((WAIT_MS..WAIT_MS + 15.0).contains(&ms), "one view: {ms} ms");
+}
+
+/// A split view's bloom (composited into a second world target rather than over a copy of the
+/// frame, `bloom.rs`) leaves the same pixels as one view of the cell's size, lamp softening
+/// included; and the next view's cell is untouched by it.
+#[test]
+#[ignore = "requires a GPU adapter (run with --ignored on the NVIDIA box)"]
+fn a_split_views_bloom_matches_one_view_of_its_size() {
+    use render::{Bloom, Renderer};
+    const S: u32 = 128;
+    let glow = |r: &mut Renderer| {
+        let tex = common::upload_tex(r, 1, 1, &[255, 100, 10, 255], "orange glow");
+        let quad = view_quad(r, -3.0);
+        let mut d = DrawCmd::textured(quad, tex, Mat4::from_scale(Vec3::splat(0.1)));
+        d.model = Mat4::from_translation(Vec3::new(0.0, 0.0, -2.7)) * d.model;
+        d.light = LightPath::Glow;
+        // A lamp: the composite also softens the frame around it.
+        d.color[3] = 2.0;
+        r.set_bloom(Some(Bloom {
+            passes: 5,
+            weight: 1.2,
+            threshold: 0.5,
+        }));
+        d
+    };
+    let mut one = Renderer::new_headless(S, S).unwrap();
+    let d = glow(&mut one);
+    one.render(&Camera::default(), &[d], [0.0, 0.0, 0.0, 1.0])
+        .unwrap();
+    let (want, _, _) = one.capture_rgba().unwrap();
+    assert!(
+        want.iter().step_by(4).filter(|&&r| r > 0).count() > 100,
+        "the glow shows"
+    );
+
+    let mut split = Renderer::new_headless(2 * S, S).unwrap();
+    let d = [glow(&mut split)];
+    for i in 0..2u32 {
+        split
+            .render_view(
+                slot([i * S, 0, S, S], i == 0, i == 1),
+                &Camera::default(),
+                if i == 0 { &d } else { &[] },
+                &[],
+                [0.0, 0.0, 0.0, 1.0],
+                None,
+            )
+            .unwrap();
+    }
+    let (got, w, _) = split.capture_rgba().unwrap();
+    for y in 0..S {
+        for x in 0..S {
+            let at = ((y * S + x) * 4) as usize;
+            assert_eq!(
+                pixel(&got, w, x, y)[..3],
+                want[at..at + 3],
+                "left cell ({x},{y})"
+            );
+            assert_eq!(
+                pixel(&got, w, S + x, y)[..3],
+                [0, 0, 0],
+                "right cell ({x},{y})"
+            );
+        }
+    }
+}

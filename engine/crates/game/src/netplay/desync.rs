@@ -13,8 +13,8 @@
 //!   [`RING_TICKS`] ticks.
 //! - It also keeps a [`BundleLog`]: every bundle it stepped this round from
 //!   tick 0, sealed into zstd chunks (the `net` log encoding) as they fill.
-//!   The report carries all of it (a superset of the last
-//!   [`REPORT_BUNDLES`]), so the round can be re-simulated from its setup.
+//!   The report carries all of it (a superset of the last 300 bundles),
+//!   so the round can be re-simulated from its setup.
 //! - A report holds the mismatch tick, both hashes, both sides' builds and
 //!   OS/CPU, each side's rows for the [`REPORT_ROWS`] ticks up to and
 //!   including the mismatch (the host's file holds both sides' when the
@@ -40,8 +40,6 @@ use std::path::{Path, PathBuf};
 pub const RING_TICKS: usize = 512;
 /// Rows a report carries per side: the mismatch tick and the ticks before.
 pub const REPORT_ROWS: u32 = 60;
-/// Bundles a report must cover (it carries the whole round log).
-pub const REPORT_BUNDLES: u32 = 300;
 /// Stepped ticks the host waits for a guest's rows (5 s).
 pub const GUEST_ROWS_WAIT: u32 = 150;
 /// A row's values after its tick.

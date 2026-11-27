@@ -8,3 +8,6 @@ license.workspace = true
 core = { path = "../core" }
 gilrs.workspace = true
 serde.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"

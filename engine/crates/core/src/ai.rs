@@ -128,9 +128,6 @@ pub mod why;
 pub(crate) use abilities::input as ability_input;
 pub use arsenal::{droid_suited, item_suited, vehicle_bonus};
 pub use avoid::ROUND_MAX;
-pub use brain::legacy_think;
-#[cfg(feature = "brain-shadow")]
-pub(crate) use brain::shadow::verify as verify_shadow;
 pub use brain::think;
 pub(crate) use brain::UnitRules;
 pub use command::CmdState;

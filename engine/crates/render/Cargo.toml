@@ -13,6 +13,11 @@ pollster = { workspace = true }
 image = { workspace = true }
 thiserror = { workspace = true }
 
+[features]
+# Test hooks only (`Renderer::acquire_delay`); the game never enables it.
+test-support = []
+
 [dev-dependencies]
+render = { path = ".", features = ["test-support"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

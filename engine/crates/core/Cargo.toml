@@ -12,7 +12,6 @@ parry3d.workspace = true
 libm.workspace = true
 
 [features]
-brain-shadow = []
 route-fixtures = []
 
 # Test-only: every `ron::` use in this crate is inside `#[cfg(test)] mod tests`

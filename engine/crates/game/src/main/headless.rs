@@ -114,6 +114,44 @@ impl ReplayFrame {
         } else {
             walk.camera()
         };
+        let (width, height) = r.size();
+        let (draws, skinned) = self.build_view(r, gpu, walk, &cam, v.cam_set, (width, height))?;
+        match &mut self.overlay {
+            Some(o) => {
+                let model = hud_model(walk, &mut self.feed, 4.0 / 3.0);
+                let spawn = spawn_model(walk, &self.feed);
+                render_headless_hud(
+                    r,
+                    o,
+                    &mut self.hud_view,
+                    dt,
+                    &cam,
+                    &draws,
+                    &skinned,
+                    &model,
+                    spawn.as_ref(),
+                    gpu.clear,
+                )?
+            }
+            None => r
+                .render_frame(&cam, &draws, &skinned, gpu.clear, None)
+                .map_err(|e| anyhow!("render: {e}"))?,
+        }
+        Ok(())
+    }
+
+    /// One view's draw lists from `cam` into a `size` target: the frame, or a split cell (the
+    /// weather sized to it, as the split window's views are).
+    fn build_view(
+        &mut self,
+        r: &mut Renderer,
+        gpu: &mut SceneGpu,
+        walk: &WalkSim,
+        cam: &render::Camera,
+        cam_set: bool,
+        size: (u32, u32),
+    ) -> Result<(Vec<render::DrawCmd>, Vec<render::SkinnedDrawCmd>)> {
+        let cam = *cam;
         // Replay presentation uses elapsed sim time, independent of capture cadence.
         r.time = (walk.sim.tick as f32 * core::TICK_DT) % render::TIME_WRAP;
         r.water_time = walk.sim.tick as f64 / f64::from(core::TICK_HZ);
@@ -129,7 +167,7 @@ impl ReplayFrame {
         gpu.pose_stations(&walk.sim);
         // A set viewer camera is not the chase camera: it sees through
         // nothing.
-        let see = if v.cam_set {
+        let see = if cam_set {
             game::camera_collide::SeeThrough::default()
         } else {
             walk.camera_see_through()
@@ -142,20 +180,24 @@ impl ReplayFrame {
             walk.campaign.as_ref().map(|c| c.hidden_instances()),
         );
         walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
-        self.vehicle_vis
-            .set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| self.vis.flag_ribcage_frames(walk)));
+        self.vehicle_vis.set_flag_ribcage(
+            walk.sim
+                .ctf
+                .as_ref()
+                .map(|_| self.vis.flag_ribcage_frames(walk)),
+        );
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
         draws.extend(self.vehicle_vis.campaign_flags(&walk));
         draws.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
         self.deka_vis.eye = Some(cam.position);
         draws.extend(self.deka_vis.draws(r, &walk.sim));
-        let (width, height) = r.size();
+        let (width, height) = size;
         self.vis
-            .prepare_view(walk, &cam, width as f32 / height as f32);
+            .prepare_view(walk, &cam, width as f32 / height.max(1) as f32);
         let mut skinned = self.vis.draws(walk);
         draws.extend(self.vis.weapon_draws(walk));
         draws.extend(self.vis.cloth_draws(r, walk));
-        if !v.cam_set {
+        if !cam_set {
             let (arms, gun) = self.vis.first_person_draws(walk, &cam);
             skinned.extend(arms);
             draws.extend(gun);
@@ -180,7 +222,7 @@ impl ReplayFrame {
         particles.extend(self.holos.draws(&gpu.holo, walk, &cam));
         particles.extend(self.vehicle_vis.campaign_glows(walk, &cam));
         if let Some(w) = self.weather.as_mut() {
-            particles.extend(w.frame_draws(r, &cam, glam::Vec3::ZERO));
+            particles.extend(w.frame_draws_sized(r, &cam, glam::Vec3::ZERO, [width, height]));
         }
         self.fx.submit_walk(r, &cam, walk, particles);
         draws.extend(game::squad_vis::squad_draws(
@@ -191,28 +233,7 @@ impl ReplayFrame {
             self.icons.1,
             &cam,
         ));
-        match &mut self.overlay {
-            Some(o) => {
-                let model = hud_model(walk, &mut self.feed, 4.0 / 3.0);
-                let spawn = spawn_model(walk, &self.feed);
-                render_headless_hud(
-                    r,
-                    o,
-                    &mut self.hud_view,
-                    dt,
-                    &cam,
-                    &draws,
-                    &skinned,
-                    &model,
-                    spawn.as_ref(),
-                    gpu.clear,
-                )?
-            }
-            None => r
-                .render_frame(&cam, &draws, &skinned, gpu.clear, None)
-                .map_err(|e| anyhow!("render: {e}"))?,
-        }
-        Ok(())
+        Ok((draws, skinned))
     }
 }
 
@@ -676,7 +697,12 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         let mut draws = gpu.draws.clone();
         walk_draws(cube, &walk, &mut draws, Some(&vis));
         vehicle_vis.set_ctf_viewer(walk.sim.unit(walk.player).map(|u| u.team));
-        vehicle_vis.set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| vis.flag_ribcage_frames(&walk)));
+        vehicle_vis.set_flag_ribcage(
+            walk.sim
+                .ctf
+                .as_ref()
+                .map(|_| vis.flag_ribcage_frames(&walk)),
+        );
         draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
         draws.extend(vehicle_vis.campaign_flags(&walk));
         draws.extend(deka_vis.draws(&mut r, &walk.sim));

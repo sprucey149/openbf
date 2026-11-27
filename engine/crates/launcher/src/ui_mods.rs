@@ -467,61 +467,16 @@ impl LauncherApp {
 
                 ui.horizontal(|ui| {
                     let status = content_status_badge(playable, enabled, state);
-                    let status_w = status
-                        .as_ref()
-                        .map(|(s, _)| {
-                            ui.fonts_mut(|f| {
-                                f.layout_no_wrap(s.clone(), regular_font(12.0), TEXT_MUTED)
-                                    .size()
-                                    .x
-                            }) + 12.0
-                        })
-                        .unwrap_or(0.0);
-                    // Reserve width for right-hand controls (#N + up/down arrows + toggle + status)
-                    // so long mod titles always truncate cleanly instead of colliding.
-                    let right_reserve = 154.0 + status_w;
-                    let left_w = (card_w - right_reserve).max(80.0);
-                    let header_alloc = ui.allocate_ui_with_layout(
-                        Vec2::new(left_w, 22.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.set_max_width(left_w);
-                            ui.horizontal(|ui| {
-                                draw_expand_chevron(ui, expanded);
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(&info.display_name)
-                                            .font(bold_font(14.0))
-                                            .color(TEXT_PRIMARY),
-                                    )
-                                    .truncate()
-                                    .selectable(false),
-                                );
-                                if let Some(ver) = &info.version {
-                                    ui.add(
-                                        egui::Label::new(
-                                            egui::RichText::new(format!("v{ver}"))
-                                                .font(regular_font(12.0))
-                                                .color(TEXT_MUTED),
-                                        )
-                                        .wrap_mode(egui::TextWrapMode::Extend)
-                                        .selectable(false),
-                                    );
-                                }
-                            });
-                        },
+                    draw_card_header(
+                        ui,
+                        card_w,
+                        status.as_ref().map(|(s, _)| s.as_str()),
+                        expand_id,
+                        &mut expanded,
+                        &info.display_name,
+                        info.version.as_deref(),
+                        None,
                     );
-                    let header_resp = ui.interact(
-                        header_alloc.response.rect,
-                        expand_id.with("header"),
-                        Sense::click(),
-                    );
-                    if header_resp.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    if header_resp.clicked() {
-                        expanded = !expanded;
-                    }
 
                     action = draw_card_right_controls(
                         ui,
@@ -820,58 +775,16 @@ impl LauncherApp {
 
                 ui.horizontal(|ui| {
                     let status = (!manifest.supported).then_some(("Unsupported", DOT_MISSING));
-                    let status_w = status
-                        .map(|(s, _)| {
-                            ui.fonts_mut(|f| {
-                                f.layout_no_wrap(s.to_owned(), regular_font(12.0), TEXT_MUTED)
-                                    .size()
-                                    .x
-                            }) + 12.0
-                        })
-                        .unwrap_or(0.0);
-                    let left_w = (card_w - (154.0 + status_w)).max(80.0);
-                    let header_alloc = ui.allocate_ui_with_layout(
-                        Vec2::new(left_w, 22.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.set_max_width(left_w);
-                            ui.horizontal(|ui| {
-                                draw_expand_chevron(ui, expanded);
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(&manifest.name)
-                                            .font(bold_font(14.0))
-                                            .color(TEXT_PRIMARY),
-                                    )
-                                    .truncate()
-                                    .selectable(false),
-                                );
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(format!("v{}", manifest.version))
-                                            .font(regular_font(12.0))
-                                            .color(TEXT_MUTED),
-                                    )
-                                    .wrap_mode(egui::TextWrapMode::Extend)
-                                    .selectable(false),
-                                );
-                                if manifest.origin == ExtensionOrigin::Bundled {
-                                    extension_badge(ui, manifest.origin.label(), false);
-                                }
-                            });
-                        },
+                    draw_card_header(
+                        ui,
+                        card_w,
+                        status.map(|(s, _)| s),
+                        expand_id,
+                        &mut expanded,
+                        &manifest.name,
+                        Some(&manifest.version),
+                        (manifest.origin == ExtensionOrigin::Bundled).then(|| manifest.origin.label()),
                     );
-                    let header_resp = ui.interact(
-                        header_alloc.response.rect,
-                        expand_id.with("header"),
-                        Sense::click(),
-                    );
-                    if header_resp.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    if header_resp.clicked() {
-                        expanded = !expanded;
-                    }
 
                     action = draw_card_right_controls(
                         ui,
@@ -1074,6 +987,77 @@ fn draw_one_resource_op(
             )
             .wrap(),
         );
+    }
+}
+
+/// The left part of a card's header row: chevron, title, version and an
+/// optional badge, clicked to expand or collapse. Width is left for the
+/// right-hand controls (#N, up/down arrows, toggle and `status`) so long
+/// titles truncate cleanly instead of colliding.
+#[allow(clippy::too_many_arguments)]
+fn draw_card_header(
+    ui: &mut egui::Ui,
+    card_w: f32,
+    status: Option<&str>,
+    expand_id: egui::Id,
+    expanded: &mut bool,
+    title: &str,
+    version: Option<&str>,
+    badge: Option<&str>,
+) {
+    let status_w = status
+        .map(|s| {
+            ui.fonts_mut(|f| {
+                f.layout_no_wrap(s.to_owned(), regular_font(12.0), TEXT_MUTED)
+                    .size()
+                    .x
+            }) + 12.0
+        })
+        .unwrap_or(0.0);
+    let left_w = (card_w - (154.0 + status_w)).max(80.0);
+    let header_alloc = ui.allocate_ui_with_layout(
+        Vec2::new(left_w, 22.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.set_max_width(left_w);
+            ui.horizontal(|ui| {
+                draw_expand_chevron(ui, *expanded);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(title)
+                            .font(bold_font(14.0))
+                            .color(TEXT_PRIMARY),
+                    )
+                    .truncate()
+                    .selectable(false),
+                );
+                if let Some(ver) = version {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!("v{ver}"))
+                                .font(regular_font(12.0))
+                                .color(TEXT_MUTED),
+                        )
+                        .wrap_mode(egui::TextWrapMode::Extend)
+                        .selectable(false),
+                    );
+                }
+                if let Some(label) = badge {
+                    extension_badge(ui, label, false);
+                }
+            });
+        },
+    );
+    let header_resp = ui.interact(
+        header_alloc.response.rect,
+        expand_id.with("header"),
+        Sense::click(),
+    );
+    if header_resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if header_resp.clicked() {
+        *expanded = !*expanded;
     }
 }
 

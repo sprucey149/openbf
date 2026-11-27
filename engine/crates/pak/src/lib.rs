@@ -510,12 +510,6 @@ struct Mount {
 static EXE: OnceLock<Option<Arc<Archive>>> = OnceLock::new();
 static MOUNTS: Mutex<Vec<Mount>> = Mutex::new(Vec::new());
 
-/// The running game's archive, if any (opened once): see [`find_archive`].
-pub fn exe_archive() -> Option<&'static Archive> {
-    EXE.get_or_init(|| find_archive(&std::env::current_exe().ok()?).map(Arc::new))
-        .as_deref()
-}
-
 fn exe_archive_arc() -> Option<Arc<Archive>> {
     EXE.get_or_init(|| find_archive(&std::env::current_exe().ok()?).map(Arc::new))
         .clone()

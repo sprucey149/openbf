@@ -17,6 +17,40 @@ const RECEIVER_BIAS: f32 = 0.055;
 // OURS: nearby lit and shadowed floor patches in the supplied PC screenshot
 // had median display luma of about 185 and 125. measure: a locked-camera pair.
 const SHADOW_TRANSMITTANCE: f32 = 0.68;
+const FULL_SIZE: u32 = 4096;
+// OURS: a split cell at most half the window each way draws a 2048 map over the same span
+// (3.1 cm texels): the same texels per screen pixel as one full-window view at 4096, for about
+// half the depth pass's cost per view. measure: littlemallard 4-view bench, PERF-3 note.
+const CELL_SIZE: u32 = 2048;
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
+
+/// Does a split view of `cell` (`[x, y, width, height]`) in a `window` draw the cell-size
+/// shadow map? Only a cell at most half the window in each dimension: the 2x2 cells of 3 and
+/// 4 views. Two views (each a full-width or full-height half) and one view keep the full map.
+pub(crate) fn cell_map(cell: [u32; 4], window: (u32, u32)) -> bool {
+    cell[2] * 2 <= window.0 && cell[3] * 2 <= window.1
+}
+
+/// One depth map the casters draw into, and its edge in texels.
+struct ShadowMap {
+    size: u32,
+    depth: wgpu::TextureView,
+}
+
+impl ShadowMap {
+    fn new(device: &wgpu::Device, label: &str, size: u32) -> Self {
+        let depth = crate::resources::texture_2d(
+            device,
+            label,
+            [size, size],
+            DEPTH_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            &[],
+        )
+        .create_view(&Default::default());
+        Self { size, depth }
+    }
+}
 
 pub(crate) fn caster_key(draw: &DrawCmd) -> (bool, u32, Option<u32>) {
     let masked = draw.layer == DrawLayer::Mask;
@@ -37,8 +71,9 @@ struct ShadowView {
 }
 
 pub(crate) struct SunShadow {
-    size: u32,
-    depth: wgpu::TextureView,
+    full: ShadowMap,
+    /// The split cells' map ([`cell_map`]), made on the first such view.
+    cell: std::sync::OnceLock<ShadowMap>,
     uniform: wgpu::Buffer,
     camera: wgpu::BindGroup,
     rigid: wgpu::RenderPipeline,
@@ -54,17 +89,8 @@ pub(crate) struct SunShadow {
 impl SunShadow {
     fn new(r: &Renderer) -> Self {
         let device = &r.device;
-        let size = 4096.min(device.limits().max_texture_dimension_2d);
-        let depth_format = wgpu::TextureFormat::Depth16Unorm;
-        let depth = crate::resources::texture_2d(
-            device,
-            "sun shadow depth",
-            [size, size],
-            depth_format,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            &[],
-        )
-        .create_view(&Default::default());
+        let size = FULL_SIZE.min(device.limits().max_texture_dimension_2d);
+        let full = ShadowMap::new(device, "sun shadow depth", size);
         let uniform = crate::resources::buffer(
             device,
             "sun shadow view",
@@ -111,7 +137,7 @@ impl SunShadow {
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: depth_format,
+                    format: DEPTH_FORMAT,
                     depth_write_enabled: true,
                     depth_compare: wgpu::CompareFunction::LessEqual,
                     stencil: Default::default(),
@@ -210,8 +236,8 @@ impl SunShadow {
         let outside_volume = stencil_pipeline(wgpu::CompareFunction::Equal, "fs_composite");
         let inside_volume = stencil_pipeline(wgpu::CompareFunction::NotEqual, "fs_stencil");
         Self {
-            size,
-            depth,
+            full,
+            cell: std::sync::OnceLock::new(),
             uniform,
             camera,
             rigid,
@@ -225,14 +251,34 @@ impl SunShadow {
         }
     }
 
-    pub fn light_clip(&self, eye: Vec3, direction: Vec3) -> Mat4 {
+    fn map_size(&self, cell: bool) -> u32 {
+        if cell {
+            CELL_SIZE.min(self.full.size)
+        } else {
+            self.full.size
+        }
+    }
+
+    fn map(&self, device: &wgpu::Device, cell: bool) -> &ShadowMap {
+        if cell {
+            self.cell.get_or_init(|| {
+                ShadowMap::new(device, "sun shadow depth (split cell)", self.map_size(true))
+            })
+        } else {
+            &self.full
+        }
+    }
+
+    /// The light's clip for a view at `eye`, snapped to the texels of the map it draws:
+    /// the split cells' map when `cell` ([`cell_map`]), else the full one.
+    pub fn light_clip(&self, eye: Vec3, direction: Vec3, cell: bool) -> Mat4 {
         let up = if direction.y.abs() > 0.95 {
             Vec3::Z
         } else {
             Vec3::Y
         };
         let rotation = Mat4::look_to_rh(Vec3::ZERO, direction, up);
-        let texels_per_metre = self.size as f32 / (2.0 * HALF_SPAN);
+        let texels_per_metre = self.map_size(cell) as f32 / (2.0 * HALF_SPAN);
         let mut anchor = rotation.transform_point3(eye);
         anchor.x = (anchor.x * texels_per_metre).round() / texels_per_metre;
         anchor.y = (anchor.y * texels_per_metre).round() / texels_per_metre;
@@ -271,11 +317,12 @@ impl SunShadow {
         draws: &[DrawCmd],
         casters: &[usize],
         first_instance: usize,
+        cell: bool,
     ) -> u32 {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sun shadow depth"),
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth,
+                view: &self.map(&r.device, cell).depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
@@ -317,6 +364,7 @@ impl SunShadow {
         encoder: &mut wgpu::CommandEncoder,
         frame: &wgpu::Texture,
         depth_view: &wgpu::TextureView,
+        cell: bool,
     ) -> u32 {
         let stencil = !r.shadows.is_empty();
         let scene_depth = depth_view
@@ -331,7 +379,7 @@ impl SunShadow {
             entries: &[
                 bindings::entire_buffer(0, &self.uniform),
                 bindings::texture_view(1, &scene_depth),
-                bindings::texture_view(2, &self.depth),
+                bindings::texture_view(2, &self.map(&r.device, cell).depth),
                 bindings::sampler(3, &self.compare),
             ],
         });
@@ -389,5 +437,35 @@ impl Renderer {
 
     pub fn sun_shadows_enabled(&self) -> bool {
         self.sun_shadow.is_some() && self.lighting.sun_dir.try_normalize().is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cell_map;
+
+    #[test]
+    fn only_quarter_cells_draw_the_cell_map() {
+        // A 3840x2161 window (the couch TV at scale 1.70), split as `split_layout::cells`
+        // lays it out with its 2-pixel border.
+        let window = (3840, 2161);
+        assert!(!cell_map([0, 0, 3840, 2161], window), "one view");
+        assert!(
+            !cell_map([0, 0, 1919, 2161], window),
+            "two views side by side"
+        );
+        assert!(
+            !cell_map([0, 0, 3840, 1079], window),
+            "two views one over the other"
+        );
+        // Three and four views are the 2x2 grid's cells.
+        assert!(cell_map([0, 0, 1919, 1079], window), "a 2x2 cell");
+        assert!(
+            cell_map([1921, 1081, 1919, 1079], window),
+            "the last 2x2 cell"
+        );
+        // An even half, no border, still qualifies; one pixel more does not.
+        assert!(cell_map([0, 0, 1920, 1080], (3840, 2160)));
+        assert!(!cell_map([0, 0, 1921, 1080], (3840, 2160)));
     }
 }

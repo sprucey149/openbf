@@ -89,14 +89,6 @@ def box_distance_lower(point, box):
     return max(0., math.nextafter(math.nextafter(value, -math.inf), -math.inf))
 
 
-def segment_distance2(p, a, b):
-    ab = sub(b, a)
-    size = dot(ab, ab)
-    t = max(0.0, min(1.0, dot(sub(p, a), ab) / size)) if size else 0
-    d = sub(p, add(a, mul(ab, t)))
-    return dot(d, d)
-
-
 def triangle_closest(p, tri):
     """Closest point by triangle Voronoi region; degenerate faces use edges."""
     a, b, c = tri

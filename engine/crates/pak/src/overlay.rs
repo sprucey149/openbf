@@ -96,9 +96,6 @@ fn join_rel(base: &Path, rel: &str) -> Option<PathBuf> {
     Some(out)
 }
 
-/// Resolve an overlay file path for `(mount_name, rel_key)`.
-/// Order: private namespaces first (never shadowed by unrelated mods), then
-/// explicit overrides in load-order priority (`index 0` wins).
 /// What the overlays make of one file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Resolved {
@@ -110,6 +107,9 @@ pub(crate) enum Resolved {
     Removed,
 }
 
+/// Resolve an overlay file path for `(mount_name, rel_key)`.
+/// Order: private namespaces first (never shadowed by unrelated mods), then
+/// explicit overrides in load-order priority (`index 0` wins).
 pub(crate) fn resolve_file(mount_name: &str, rel_key: &str) -> Option<Resolved> {
     if rel_key.is_empty() || !is_safe_rel(rel_key) {
         return None;

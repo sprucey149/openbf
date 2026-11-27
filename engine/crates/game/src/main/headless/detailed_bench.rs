@@ -6,27 +6,12 @@ use super::*;
 use serde_json::json;
 use std::time::Instant;
 
+#[path = "sensors.rs"]
+mod sensors;
+
 // CLOCK_THREAD_CPUTIME_ID excludes scheduler waits. Other platforms retain wall
 // samples and report no CPU samples, rather than relabeling wall time as CPU.
-#[cfg(target_os = "linux")]
-fn cpu_ms() -> Option<f64> {
-    #[repr(C)]
-    struct Timespec {
-        sec: std::ffi::c_long,
-        ns: std::ffi::c_long,
-    }
-    unsafe extern "C" {
-        fn clock_gettime(clock: std::ffi::c_int, time: *mut Timespec) -> std::ffi::c_int;
-    }
-    let mut t = Timespec { sec: 0, ns: 0 };
-    // SAFETY: a writable ABI-compatible timespec; Linux clock id 3 is thread CPU.
-    (unsafe { clock_gettime(3, &mut t) } == 0).then_some(t.sec as f64 * 1000.0 + t.ns as f64 / 1e6)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn cpu_ms() -> Option<f64> {
-    None
-}
+use game::frame_profile::thread_cpu_ms as cpu_ms;
 
 /// This thread's user-mode instructions, the one count another job on the
 /// machine does not move. On a hybrid CPU it only runs on the cores of the PMU
@@ -146,6 +131,89 @@ fn scripted_pad(k: u32) -> core::sim::PadState {
     }
 }
 
+/// `--bench-seats`: who drives each local player's pad, indexed by their slot. `ai`: the bots'
+/// own brain thinks for the seat's soldier on the sim as it stands (`core::ai::think`, its state
+/// kept here, never in the sim), and on the spawn screens the seat accepts a page every second.
+/// `script`: [`scripted_pad`], each seat phased. `idle`: nobody touches a pad. Every pad is a
+/// function of the sim and the tick, so a run's hashes do not depend on its frames or threads.
+struct SeatDriver {
+    mode: &'static str,
+    brains: Vec<Option<(core::unit::UnitHandle, core::ai::AiState)>>,
+    /// Per seat: metres walked by its soldiers, lives begun, last position.
+    walked: Vec<f32>,
+    lives: Vec<u32>,
+    at: Vec<Option<glam::Vec3>>,
+}
+
+impl SeatDriver {
+    fn new(mode: &'static str, seats: usize) -> Self {
+        Self {
+            mode,
+            brains: vec![None; seats],
+            walked: vec![0.0; seats],
+            lives: vec![0; seats],
+            at: vec![None; seats],
+        }
+    }
+
+    fn pads(&mut self, walk: &WalkSim) -> Vec<core::sim::PadState> {
+        use core::sim::{buttons, PadState};
+        let k = walk.sim.tick as u32;
+        let mut pads = vec![PadState::default(); self.brains.len().max(1)];
+        for i in 0..walk.local_count().min(self.brains.len()) {
+            let slot = usize::from(walk.local_slot_of(i));
+            let h = walk.local_unit(i);
+            let live = walk.sim.unit(h).filter(|u| u.alive);
+            match (live, self.at[i]) {
+                (Some(u), Some(was)) => self.walked[i] += (u.soldier.pos - was).length(),
+                (Some(_), None) => self.lives[i] += 1,
+                _ => {}
+            }
+            self.at[i] = live.map(|u| u.soldier.pos);
+            let pad = match (self.mode, live) {
+                ("ai", Some(u)) => {
+                    let brain = match &mut self.brains[i] {
+                        Some((had, st)) if *had == h => st,
+                        b => &mut b.insert((h, u.ai)).1,
+                    };
+                    core::ai::think(&walk.sim, h, brain).0
+                }
+                ("ai", None) => {
+                    self.brains[i] = None;
+                    // One spawn page a second, seats a third of a second apart.
+                    let phase = (k + 10 * i as u32) % 30;
+                    PadState {
+                        buttons: match phase {
+                            0 => buttons::SPAWN_ACCEPT,
+                            15 => buttons::RESPAWN,
+                            _ => 0,
+                        },
+                        ..Default::default()
+                    }
+                }
+                ("script", _) => scripted_pad(k.wrapping_add(37 * i as u32)),
+                _ => PadState::default(),
+            };
+            if pads.len() <= slot {
+                pads.resize(slot + 1, PadState::default());
+            }
+            pads[slot] = pad;
+        }
+        pads
+    }
+
+    fn report(&self, walk: &WalkSim) -> serde_json::Value {
+        let seats: Vec<serde_json::Value> = (0..walk.local_count().min(self.brains.len()))
+            .map(|i| {
+                let u = &walk.sim.units[walk.local_unit(i).index as usize];
+                json!({"team": u.team, "kills": u.kills, "deaths": u.deaths,
+                    "lives": self.lives[i], "walked_m": self.walked[i]})
+            })
+            .collect();
+        json!({"mode": self.mode, "seats": seats})
+    }
+}
+
 fn measured_tick(walk: &mut WalkSim, pad: &[core::sim::PadState]) {
     walk.step_tick(pad);
 }
@@ -215,6 +283,25 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         None
     };
     let mut walk = super::super::battle::make_walk_with_counts(&scene, &setup, counts)?;
+    // `--bench-views`: the further people on this machine, as the split window seats them but
+    // without their spawn screens, so they respawn on their own like the first player here.
+    for slot in 1..v.bench_views as u8 {
+        walk.add_local_player(slot, None)
+            .map_err(|e| anyhow!("bench player {slot} could not be seated: {e:?}"))?;
+    }
+    // Driven seats play as the window seats them: behind their spawn screens.
+    if v.bench_seats != "idle" {
+        super::super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref());
+        let side_choice = setup
+            .mission
+            .as_ref()
+            .map_or(true, |m| m.allows_side_select());
+        for i in 1..walk.local_count() {
+            let slot = usize::from(walk.local_slot_of(i));
+            walk.sim.open_spawn_screens(slot, side_choice);
+        }
+    }
+    let mut seats = SeatDriver::new(v.bench_seats, v.bench_views.max(1));
     let setup_ms = ms(t);
     let initial_alive = alive(&walk);
     if total {
@@ -225,7 +312,11 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
     }
     let initial_hash = format!("{:016x}", walk.sim.hash());
     let scripted = std::env::var("OPENBF_BENCH_PLAYER").is_ok_and(|s| s == "script");
-    let idle = [core::sim::PadState::default()];
+    // One driver per pad: the gate's one scripted human, or the seats' own.
+    anyhow::ensure!(
+        !scripted || v.bench_seats == "idle",
+        "OPENBF_BENCH_PLAYER=script drives the first pad itself; use it with --bench-seats idle"
+    );
     let mut ticks = Vec::with_capacity(v.bench_ticks as usize);
     let mut slowest = SlowTicks::default();
     let mut hashes = Vec::new();
@@ -237,13 +328,12 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
     let mut was_alive = walk.sim.unit(walk.player).is_some_and(|u| u.alive);
     let memory_after_setup = memory_kb();
     for k in 0..v.bench_ticks {
+        let mut pad = seats.pads(&walk);
         let t = Instant::now();
         let mark = Mark::now(&counter);
-        let pad = if scripted {
-            [scripted_pad(k)]
-        } else {
-            idle.clone()
-        };
+        if scripted {
+            pad[0] = scripted_pad(k);
+        }
         let pad = &pad[..];
         if targets.contains(&(k + 1)) {
             targeted_tick(&mut walk, pad);
@@ -299,9 +389,10 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         "leaf_groups": scene.manifest.leaf.len(),
         "falling_leaves": scene.manifest.leaf.iter().map(|l| u32::from(l.falling_count)).sum::<u32>(),
     });
-    if v.bench_frames > 0 {
-        render(v, &scene, &setup, &mut walk, &mut report)?;
+    if v.bench_frames > 0 || v.bench_pipelined {
+        render(v, &scene, &setup, &mut walk, &mut seats, &mut report)?;
     }
+    report["seats"] = seats.report(&walk);
     report["memory_end_kb"] = memory_kb();
     std::fs::write(output, serde_json::to_vec(&report)?)?;
     slowest.print();
@@ -324,6 +415,7 @@ fn render(
     scene: &game::assets::Scene,
     setup: &BattleSetup,
     walk: &mut WalkSim,
+    seats: &mut SeatDriver,
     report: &mut serde_json::Value,
 ) -> Result<()> {
     render::made::enable(true);
@@ -333,6 +425,11 @@ fn render(
     if std::env::var("OPENBF_HARD_SHADOWS").as_deref() == Ok("1") {
         r.set_sun_shadows(true);
     }
+    if let Some(scale) = v.bench_scale {
+        r.set_world_scale(scale);
+    }
+    report["views"] = json!(v.bench_views);
+    report["world_scale"] = json!(r.world_scale());
     report["device_ms"] = json!(ms(t));
     report["adapter"] = json!(format!("{:?}", r.adapter_info()));
     let t = Instant::now();
@@ -404,15 +501,46 @@ fn render(
             v, &mut r, &mut gpu, walk, &mut frame, &view, &states, report,
         );
     }
+    if v.bench_pipelined {
+        return pipelined(v, scene, &mut r, &mut gpu, walk, &mut frame, &view, seats, report);
+    }
     let counter = InstrCounter::new();
     for k in 0..=v.bench_frames {
         let t = Instant::now();
         let mark = Mark::now(&counter);
         if k % 2 == 0 {
-            step_world(v, &mut gpu, walk, &mut frame);
+            let pads = seats.pads(walk);
+            step_world(v, &mut gpu, walk, &mut frame, &pads, &mut []);
         }
         let update = mark.since(&counter);
         let update_ms = ms(t);
+        if v.bench_views > 1 {
+            let render_start = Instant::now();
+            let views = split_frame(&mut r, &mut gpu, walk, &mut frame, v.bench_views)?;
+            let render_ms = ms(render_start);
+            let mut gpu_ms: Vec<(String, f64)> = Vec::new();
+            for view in &views {
+                for (label, t) in view["gpu_ms"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|p| Some((p.get(0)?.as_str()?.to_owned(), p.get(1)?.as_f64()?)))
+                {
+                    match gpu_ms.iter_mut().find(|(l, _)| *l == label) {
+                        Some((_, sum)) => *sum += t,
+                        None => gpu_ms.push((label, t)),
+                    }
+                }
+            }
+            // The timer's own sum of the present's views (`Renderer::gpu_sections` under
+            // `time_every_view`): the same total as `gpu_ms`, a check on the sum.
+            let present_gpu_ms: f64 = r.gpu_sections().iter().map(|s| s.1).sum();
+            frames.push(json!({"frame": k, "wall_ms": ms(t), "render_ms": render_ms,
+                "update": update, "update_ms": update_ms, "gpu_ms": gpu_ms,
+                "present_gpu_ms": present_gpu_ms,
+                "views": views, "alive": alive(walk)}));
+            continue;
+        }
         let render_start = Instant::now();
         let mark = Mark::now(&counter);
         frame.render(&mut r, &mut gpu, walk, &view, 1.0 / 60.0)?;
@@ -438,6 +566,54 @@ fn render(
     }
     render::made::enable(false);
     Ok(())
+}
+
+/// `--bench-views`: one frame of `n` views as the split window draws it, each player's world
+/// from their own eye through `render_view` into their cell. The bench waits for the GPU after
+/// each view (the window does not) so each view's CPU build, submit and GPU sections are its
+/// own; under `OPENBF_GPU_TIMING=1` every view is timed (`Renderer::time_every_view`).
+fn split_frame(
+    r: &mut Renderer,
+    gpu: &mut SceneGpu,
+    walk: &mut WalkSim,
+    frame: &mut ReplayFrame,
+    n: usize,
+) -> Result<Vec<serde_json::Value>> {
+    let (width, height) = r.size();
+    let cells = game::split_layout::cells(n, width, height, Default::default());
+    r.time_every_view = r.gpu_timing_on();
+    let mut rows = Vec::with_capacity(cells.len());
+    for (i, cell) in cells.iter().enumerate() {
+        let t = Instant::now();
+        let built = walk.with_local(i, |w| {
+            let cam = w.camera();
+            frame
+                .build_view(r, gpu, w, &cam, false, (cell[2], cell[3]))
+                .map(|(d, s)| (cam, d, s))
+        });
+        let (cam, draws, skinned) = built?;
+        let build_ms = ms(t);
+        let slot = render::ViewSlot {
+            rect: *cell,
+            first: i == 0,
+            last: i + 1 == cells.len(),
+        };
+        r.render_view(slot, &cam, &draws, &skinned, gpu.clear, None)
+            .map_err(|e| anyhow!("render: {e}"))?;
+        let submit_ms = ms(t) - build_ms;
+        r.wait_idle().map_err(|e| anyhow!("{e}"))?;
+        let view_ms = ms(t);
+        r.collect_gpu_timing();
+        let stats = r.frame_stats();
+        rows.push(
+            json!({"view": i, "build_ms": build_ms, "submit_ms": submit_ms,
+            "view_ms": view_ms, "draws": draws.len(), "skinned": skinned.len(),
+            "draw_calls": stats.draw_calls, "culled": stats.culled,
+            "submitted": stats.submitted, "gpu_ms": r.gpu_view_sections(),
+            "eye": cam.position.to_array()}),
+        );
+    }
+    Ok(rows)
 }
 
 /// `OPENBF_FRAMEAB=base,order:mesh,no:models`: price these states. The first
@@ -481,7 +657,8 @@ fn price_states(
     let mut rounds = Vec::with_capacity(v.bench_frames as usize);
     for k in 0..=v.bench_frames {
         if k % 2 == 0 {
-            step_world(v, gpu, walk, frame);
+            let pads = vec![core::sim::PadState::default(); v.bench_views.max(1)];
+            step_world(v, gpu, walk, frame, &pads, &mut []);
         }
         let mut round = vec![game::bench::PricedFrame::default(); states.len()];
         for at in 0..states.len() {
@@ -525,9 +702,17 @@ fn price_states(
     Ok(())
 }
 
-/// One sim tick and everything the frames read from it, as a battle frame does.
-fn step_world(v: &ViewerArgs, gpu: &mut SceneGpu, walk: &mut WalkSim, frame: &mut ReplayFrame) {
-    measured_tick(walk, &[core::sim::PadState::default()]);
+/// One sim tick from `pads` (by slot) and everything the frames read from it, as a battle
+/// frame does; `feeds` are the further views' event feeds (`--bench-pipelined` with `--hud`).
+fn step_world(
+    v: &ViewerArgs,
+    gpu: &mut SceneGpu,
+    walk: &mut WalkSim,
+    frame: &mut ReplayFrame,
+    pads: &[core::sim::PadState],
+    feeds: &mut [game::event_feed::EventFeed],
+) {
+    measured_tick(walk, pads);
     gpu.step_stations(&walk.sim);
     frame.fx.ingest_posed(walk, Some(&frame.vis));
     drop(frame.fx.take_sounds());
@@ -558,6 +743,9 @@ fn step_world(v: &ViewerArgs, gpu: &mut SceneGpu, walk: &mut WalkSim, frame: &mu
     }
     frame.bolts.update(walk, core::TICK_DT);
     tick_event_feed(&mut frame.feed, &walk.sim, walk.player, v.hud);
+    for (k, feed) in feeds.iter_mut().enumerate() {
+        tick_event_feed(feed, &walk.sim, walk.local_unit(k + 1), v.hud);
+    }
 }
 
 fn made() -> serde_json::Value {
@@ -567,4 +755,391 @@ fn made() -> serde_json::Value {
             "kind": m.kind, "label": m.label, "bytes": m.bytes, "ms": m.ms,
         }))
         .collect::<Vec<_>>())
+}
+
+/// Percentiles of `xs` (nearest rank), `null` when empty.
+fn pct(xs: &[f64], ps: &[f64]) -> serde_json::Value {
+    let mut v: Vec<f64> = xs.iter().copied().filter(|x| x.is_finite()).collect();
+    if v.is_empty() {
+        return serde_json::Value::Null;
+    }
+    v.sort_by(f64::total_cmp);
+    let mut out = serde_json::Map::new();
+    for p in ps {
+        let i = ((p / 100.0) * (v.len() - 1) as f64).round() as usize;
+        out.insert(format!("p{p}"), json!(v[i.min(v.len() - 1)]));
+    }
+    out.insert("mean".into(), json!(v.iter().sum::<f64>() / v.len() as f64));
+    out.insert("n".into(), json!(v.len()));
+    serde_json::Value::Object(out)
+}
+
+/// `--bench-pipelined`: frames as the window runs them for `--bench-seconds`. The sim ticks on
+/// the wall clock (30 Hz, the walk's accumulator and its cap), so a slow frame runs two ticks as
+/// on the night; nothing waits for the GPU after a view, and at most two frames are in flight
+/// (a window's frame-latency limit; headless there is no vsync, so the frame time is the
+/// pipeline's own and a vsync step is read off it afterwards). With `--bench-views` above 1 the
+/// views draw through the split window's own `render_views` (each further player's lists, their
+/// spawn-screen soldiers), and with `--hud` each view's HUD as the window paints it
+/// (`SplitUi`: the BF2 HUD with its minimap and name tags, and the egui text in each cell).
+/// One view draws the single-view frame (`ReplayFrame::render`). Each frame's row: its start,
+/// main-thread CPU, ticks, tick wall ms, the UI models', the draw and submit, the wait for the
+/// frames in flight, and the newest GPU present (`OPENBF_GPU_TIMING=1`). Clocks and power are
+/// sampled alongside ([`sensors`]). The sim hash every 30 ticks pins the run.
+#[allow(clippy::too_many_arguments)]
+fn pipelined(
+    v: &ViewerArgs,
+    scene: &game::assets::Scene,
+    r: &mut Renderer,
+    gpu: &mut SceneGpu,
+    walk: &mut WalkSim,
+    frame: &mut ReplayFrame,
+    view: &ViewerArgs,
+    seats: &mut SeatDriver,
+    report: &mut serde_json::Value,
+) -> Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let n = v.bench_views.max(1);
+    let (width, height) = r.size();
+    let cells = game::split_layout::cells(n, width, height, Default::default());
+    r.time_every_view = r.gpu_timing_on();
+    let assets = v.map.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let ui = v.hud && n > 1;
+    let mut feeds: Vec<game::event_feed::EventFeed> = (1..n)
+        .map(|i| {
+            walk.with_local(i, |w| {
+                game::event_feed::EventFeed::for_walk(assets, &scene.manifest.source_game, w)
+            })
+        })
+        .collect();
+    let mut tags: Vec<game::name_tags::NameTags> = (0..n).map(|_| Default::default()).collect();
+    let mut previews: Vec<game::spawn_preview::Preview> = Vec::new();
+    let mut preview0 = game::spawn_preview::Preview::default();
+    let away = vec![false; n];
+    let aspect = width as f32 / height.max(1) as f32;
+    let name = |slot: u8| Some(format!("Player {}", slot + 1));
+    let done = std::sync::Arc::new(AtomicU64::new(0));
+    let start = Instant::now();
+    let sampler = sensors::Sampler::start(start, std::time::Duration::from_millis(250));
+    let length = std::time::Duration::from_secs_f32(v.bench_seconds.max(1.0));
+    let mut rows = Vec::new();
+    let mut hashes = Vec::new();
+    let mut tick_ms = Vec::new();
+    let mut accum = 0.0f32;
+    let mut last = start;
+    let mut k: u64 = 0;
+    let first_tick = walk.sim.tick;
+    // `--bench-governor`: the window's automatic quality, fed as the window feeds it (the last
+    // frame's time, its main-thread CPU and its wait for a frame in flight, the headless
+    // stand-in for the acquire), held to 60 a second.
+    let mut governor = game::quality_governor::Governor::default();
+    let mut governed: Option<(f64, f64)> = None;
+    let mut scale_changes = Vec::new();
+    let map_label = game::quality_governor::map_label(&scene.dir, &scene.manifest.map, v.xl);
+    while start.elapsed() < length {
+        k += 1;
+        let t0 = Instant::now();
+        let c0 = cpu_ms();
+        let dt = (t0 - last).as_secs_f32();
+        last = t0;
+        if v.bench_governor {
+            if let Some((cpu, wait)) = governed {
+                let q = governor.frame(
+                    dt * 1000.0,
+                    Some(cpu as f32),
+                    Some(wait as f32),
+                    1000.0 / 60.0,
+                    0,
+                );
+                for note in governor.take_notes() {
+                    println!("{}", note.line(&map_label, n));
+                }
+                if q.scale != r.world_scale() {
+                    r.set_world_scale(q.scale);
+                    scale_changes.push(json!([(t0 - start).as_secs_f64(), q.scale]));
+                }
+            }
+        }
+        // The walk's accumulator (`WalkSim::advance_while`), its cap included.
+        accum = (accum + dt).min(core::MAX_FRAME_ACCUM_SECS);
+        let (mut ticks, mut ticks_ms, mut seat_ms) = (0u32, 0.0f64, 0.0f64);
+        while accum >= core::TICK_DT {
+            let ts = Instant::now();
+            let pads = seats.pads(walk);
+            seat_ms += ms(ts);
+            let tt = Instant::now();
+            step_world(v, gpu, walk, frame, &pads, &mut feeds);
+            let one = ms(tt);
+            tick_ms.push(one);
+            ticks_ms += one;
+            accum -= core::TICK_DT;
+            ticks += 1;
+            if walk.sim.tick % 30 == 0 {
+                hashes.push(json!([walk.sim.tick, format!("{:016x}", walk.sim.hash())]));
+            }
+        }
+        let tu = Instant::now();
+        let cameras: Vec<render::Camera> = (0..n).map(|i| walk.camera_of(i)).collect();
+        let mut models: Vec<Option<ui::hud::HudModel>> = Vec::new();
+        let mut spawn_up: Vec<bool> = Vec::new();
+        let mut spawn0 = None;
+        if ui {
+            models.push(Some(super::super::battle::hud_model_for_view(
+                walk,
+                &mut frame.feed,
+                aspect,
+                None,
+            )));
+            spawn0 = spawn_model(walk, &frame.feed);
+            spawn_up.push(spawn0.is_some());
+            for (m, up) in super::super::windowed::split::further_view_models(
+                walk, &mut feeds, &away, aspect, &[],
+            ) {
+                models.push(m);
+                spawn_up.push(up);
+            }
+            for (i, cell) in cells.iter().enumerate() {
+                let (Some(Some(model)), Some(t)) = (models.get_mut(i), tags.get_mut(i)) else {
+                    continue;
+                };
+                if spawn_up[i] || model.round_end.is_some() {
+                    t.clear();
+                    continue;
+                }
+                model.name_tags = game::name_tags::cell_tags(
+                    t,
+                    &walk.sim,
+                    walk.local_unit(i),
+                    &cameras[i],
+                    *cell,
+                    dt,
+                    &name,
+                );
+            }
+        }
+        let ui_ms = ms(tu);
+        // Two frames in flight: this one's draw waits for the one before last.
+        let tw = Instant::now();
+        while done.load(Ordering::Acquire) + 2 < k {
+            let _ = r.device().poll(wgpu::PollType::Poll);
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        let wait_ms = ms(tw);
+        let td = Instant::now();
+        let mut build0_ms = 0.0;
+        if n == 1 {
+            frame.render(r, gpu, walk, view, dt)?;
+        } else {
+            let tb = Instant::now();
+            let cam0 = cameras[0];
+            let (mut draws, mut skinned) =
+                frame.build_view(r, gpu, walk, &cam0, false, (cells[0][2], cells[0][3]))?;
+            if ui {
+                // View 0's spawn-screen soldiers, in its UI rectangle (as the window's).
+                let page = spawn0.as_ref().and_then(|s| s.page.as_ref());
+                let (fov_y, ui_aspect) = game::split_layout::ui_view(cam0.fov_y, cells[0]);
+                preview0.set_view_aspect(Some(ui_aspect));
+                let deka = &mut frame.deka_vis;
+                let sim = &walk.sim;
+                let (body, gun) = preview0.draws_live(
+                    r,
+                    &frame.vis,
+                    page,
+                    &render::Camera { fov_y, ..cam0 },
+                    dt,
+                    |r, team, class, model, dt| {
+                        let c = sim
+                            .classes
+                            .get(usize::from(team))?
+                            .get(usize::from(class))?
+                            .droideka
+                            .as_deref()?;
+                        Some(deka.preview_draws(r, team, class, c, model, dt))
+                    },
+                );
+                skinned.extend(body);
+                draws.extend(gun);
+            }
+            build0_ms = ms(tb);
+            let pages: Vec<Option<ui::spawn_draw::SpawnPage>> = models
+                .iter()
+                .map(|m| m.as_ref().and_then(|m| m.spawn.clone()))
+                .collect();
+            let split_ui = game::split_ui::SplitUi {
+                models: &models,
+                icons: &[],
+                dt,
+                hidden: false,
+                pause: None,
+                window: [width, height],
+                views: n,
+                hud_k: 1.0,
+                lost: &[],
+            };
+            let clear = gpu.clear;
+            let ReplayFrame {
+                cube,
+                quad,
+                sprite,
+                icons,
+                vis,
+                vehicle_vis,
+                deka_vis,
+                fx,
+                bolts,
+                weather,
+                holos,
+                overlay,
+                hud_view,
+                ..
+            } = &mut *frame;
+            let paint = match (ui, overlay.as_mut()) {
+                (true, Some(o)) => Some(o.begin_headless([width, height], 1.0, |ctx| {
+                    for (i, cell) in cells.iter().enumerate() {
+                        if let Some(Some(m)) = models.get(i) {
+                            let t = game::name_tags::cell_text(ctx, *cell, 1.0);
+                            ui::hud::draw_hud_in(ctx, m, t.rect, i + 1, t.scale, t.timer_at);
+                        }
+                    }
+                })),
+                _ => None,
+            };
+            let mut parts = super::super::windowed::split::ViewParts {
+                walk: &mut *walk,
+                cube: *cube,
+                gpu: &mut *gpu,
+                soldier_vis: Some(vis),
+                vehicle_vis,
+                deka_vis,
+                fx,
+                holos,
+                weather: weather.as_mut(),
+                bolts,
+                fx_quad: Some(*quad),
+                fx_sprite: *sprite,
+                squad_icons: *icons,
+                previews: &mut previews,
+                pages: &pages,
+                preview_dt: dt,
+                lan_view: None,
+            };
+            let mut last_overlay = |dev: &wgpu::Device,
+                                    q: &wgpu::Queue,
+                                    enc: &mut wgpu::CommandEncoder,
+                                    tv: &wgpu::TextureView,
+                                    _size: [u32; 2]| {
+                if let (Some(o), Some(p)) = (overlay.as_mut(), paint.as_ref()) {
+                    o.paint(p, dev, q, enc, tv, [width, height]);
+                }
+            };
+            let mut view_hud = |i: usize,
+                                cell: game::split_layout::Cell,
+                                dev: &wgpu::Device,
+                                q: &wgpu::Queue,
+                                enc: &mut wgpu::CommandEncoder,
+                                tv: &wgpu::TextureView| {
+                if let (true, Some(hv)) = (ui, hud_view.as_mut()) {
+                    split_ui.paint(hv, i, cell, dev, q, enc, tv);
+                }
+            };
+            super::super::windowed::split::render_views(
+                &mut parts,
+                r,
+                &cells,
+                (&draws, &skinned),
+                &cameras,
+                &[],
+                &away,
+                clear,
+                Some(&mut last_overlay),
+                Some(&mut view_hud),
+            )
+            .map_err(|e| anyhow!("render: {e}"))?;
+        }
+        let draw_ms = ms(td);
+        let d = done.clone();
+        r.queue().on_submitted_work_done(move || {
+            d.fetch_max(k, Ordering::AcqRel);
+        });
+        r.collect_gpu_timing();
+        let gpu_ms: f64 = r.gpu_sections().iter().map(|s| s.1).sum();
+        let cpu = c0.zip(cpu_ms()).map(|(a, b)| b - a);
+        governed = cpu.map(|c| (c, wait_ms));
+        rows.push(json!({
+            "t_ms": (t0 - start).as_secs_f64() * 1000.0, "cpu_ms": cpu, "ticks": ticks,
+            "tick_ms": ticks_ms, "seat_ms": seat_ms, "ui_ms": ui_ms, "build0_ms": build0_ms,
+            "draw_ms": draw_ms, "wait_ms": wait_ms, "gpu_ms": gpu_ms,
+            "draw_calls": r.frame_stats().draw_calls, "world_scale": r.world_scale(),
+        }));
+    }
+    r.wait_idle().map_err(|e| anyhow!("{e}"))?;
+    let sensors = sampler.finish();
+    // Frame time: from one frame's start to the next's.
+    let starts: Vec<f64> = rows.iter().filter_map(|f| f["t_ms"].as_f64()).collect();
+    let frame_ms: Vec<f64> = starts.windows(2).map(|w| w[1] - w[0]).collect();
+    let col = |key: &str| -> Vec<f64> { rows.iter().filter_map(|f| f[key].as_f64()).collect() };
+    let ps = [50.0, 95.0, 99.0];
+    let share = |limit: f64| {
+        frame_ms.iter().filter(|&&f| f <= limit).count() as f64 / frame_ms.len().max(1) as f64
+    };
+    let sensor_col = |key: &str| -> Vec<f64> {
+        sensors.iter().filter_map(|s| s[key].as_f64()).collect()
+    };
+    let metric_col = |key: &str| -> Vec<f64> {
+        sensors
+            .iter()
+            .filter_map(|s| s["metrics"][key].as_f64())
+            .collect()
+    };
+    let summary = json!({
+        "seconds": start.elapsed().as_secs_f64(), "frames": rows.len(),
+        "ticks": walk.sim.tick - first_tick,
+        "frame_ms": pct(&frame_ms, &ps), "cpu_ms": pct(&col("cpu_ms"), &ps),
+        "tick_ms": pct(&tick_ms, &ps), "frame_tick_ms": pct(&col("tick_ms"), &ps),
+        // The seats' own pads (`ai::think` for each seat): main-thread work inside `cpu_ms` that
+        // a window with people at the pads does not do.
+        "seat_ms": pct(&col("seat_ms"), &ps),
+        "ui_ms": pct(&col("ui_ms"), &ps), "draw_ms": pct(&col("draw_ms"), &ps),
+        "wait_ms": pct(&col("wait_ms"), &ps), "gpu_ms": pct(&col("gpu_ms"), &ps),
+        "share_within_16_7": share(1000.0 / 60.0), "share_within_33_3": share(1000.0 / 30.0),
+        "cpu_mhz": pct(&sensor_col("cpu_mhz_avg"), &ps),
+        "main_cpu_mhz": pct(&sensor_col("main_cpu_mhz"), &ps),
+        "gpu_sclk_mhz": pct(&sensor_col("gpu_sclk_mhz"), &ps),
+        "gpu_power_w": pct(&sensor_col("gpu_power_w"), &ps),
+        "socket_w": pct(&metric_col("socket_w"), &ps),
+        "tctl_c": pct(&sensor_col("tctl_c"), &ps),
+        "gpu_busy_pct": pct(&sensor_col("gpu_busy_pct"), &ps),
+    });
+    let mut summary = summary;
+    if v.bench_governor {
+        // Each scale's frames (frame time from its start to the next's), and where it settled.
+        let mut per_scale: Vec<(f64, Vec<f64>)> = Vec::new();
+        for (row, ms) in rows.iter().zip(&frame_ms) {
+            let s = row["world_scale"].as_f64().unwrap_or(1.0);
+            match per_scale.iter_mut().find(|p| p.0 == s) {
+                Some(p) => p.1.push(*ms),
+                None => per_scale.push((s, vec![*ms])),
+            }
+        }
+        summary["governor"] = json!({
+            "changes": scale_changes,
+            "final_scale": r.world_scale(),
+            "per_scale": per_scale.iter().map(|(s, f)| json!({"scale": s, "frame_ms": pct(f, &ps)})).collect::<Vec<_>>(),
+        });
+    }
+    println!("pipelined: {}", serde_json::to_string(&summary)?);
+    report["views"] = json!(n);
+    report["pipelined"] = summary;
+    report["pipelined_frames"] = json!(rows);
+    report["pipelined_tick_hashes"] = json!(hashes);
+    report["sensors"] = json!(sensors);
+    report["think_threads"] = json!(core::sim::think_pool::default_think_threads());
+    report["final_hash"] = json!(format!("{:016x}", walk.sim.hash()));
+    report["alive_end"] = json!(alive(walk));
+    if let Some(path) = &v.capture_frame {
+        let (rgba, w, h) = r.capture_rgba()?;
+        image::save_buffer(path, &rgba, w, h, image::ColorType::Rgba8)?;
+    }
+    render::made::enable(false);
+    Ok(())
 }

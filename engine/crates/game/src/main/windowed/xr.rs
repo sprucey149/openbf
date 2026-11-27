@@ -117,12 +117,19 @@ impl App {
         &mut self,
         window: std::sync::Arc<winit::window::Window>,
     ) -> anyhow::Result<render::Renderer> {
-        if let Some(early) = self.early_display.take() {
-            let (renderer, active) = early.open_renderer(window)?;
-            self.display_ext = Some(active);
-            return Ok(renderer);
-        }
-        Ok(render::Renderer::new_windowed(window)?)
+        let mut renderer = match self.early_display.take() {
+            Some(early) => {
+                let (renderer, active) = early.open_renderer(window)?;
+                self.display_ext = Some(active);
+                renderer
+            }
+            None => render::Renderer::new_windowed(window)?,
+        };
+        // Measurement only: under `OPENBF_GPU_TIMING=1` (the timer exists only then) every
+        // split view of a present is timed, so a split frame's GPU sections cover all its views.
+        // One view is its present's first and last, so a single view times as before.
+        renderer.time_every_view = renderer.gpu_timing_on();
+        Ok(renderer)
     }
 
     pub(super) fn begin_display_ext_frame(&mut self) -> anyhow::Result<()> {

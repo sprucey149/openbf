@@ -36,7 +36,7 @@
 //!   [`Node::loaded_at`], [`Node::playing_at`] and [`Node::first_step`]
 //!   record when it built, when it first played and its first stepped tick.
 //!   With [`Node::build_floor_ms`] the build alone takes that long: once the
-//!   host skips the loading screen ([`VirtualNet::host_skip`],
+//!   host skips the loading screen (`VirtualNet::host_skip`,
 //!   [`Peer::loading_skipped`]) the node builds at its floor (or at once if
 //!   past it) instead of at the end of `load_ms`.
 //! - Heroes (opt-in, [`VirtualNet::heroes`]): the scripted pads also accept
@@ -156,6 +156,7 @@ impl NodeLink {
         }
     }
 
+    #[cfg(test)]
     pub fn client_mut(&mut self) -> Option<&mut ClientCore> {
         match self {
             NodeLink::Client(c) => Some(c),
@@ -587,6 +588,7 @@ impl VirtualNet {
 
     /// The host skips its round start's loading screen for everyone
     /// ([`Peer::skip_loading`]). Returns whether the skip went out.
+    #[cfg(test)]
     pub fn host_skip(&mut self) -> bool {
         let n = &mut self.nodes[0];
         n.peer.skip_loading(&mut n.link)

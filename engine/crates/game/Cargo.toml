@@ -50,7 +50,6 @@ x11rb = "0.13"
 default = ["vr"]
 # Bundled OpenBF VR OpenXR extension (Windows and Linux).
 vr = ["dep:openbf_vr"]
-brain-shadow = ["core/brain-shadow"]
 # Count every heap allocation, for `--bench` runs that report it (`game::alloc_count`).
 alloc-count = []
 # Dev-only per-round JSON logs (`game::session_stats`), built by

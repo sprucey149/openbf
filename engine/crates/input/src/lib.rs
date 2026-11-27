@@ -339,12 +339,87 @@ pub fn unresolved(pad: &gilrs::Gamepad<'_>, map: &Mapping) -> Vec<String> {
             out.push(format!("{a:?}"));
         }
     }
+    let driver = pad.mapping_source() == gilrs::MappingSource::Driver;
     for &(b, _) in &map.table {
-        if pad.button_code(b).is_none() {
+        if pad.button_code(b).is_none()
+            && !driver_fallback_resolves(b, driver, |a| pad.axis_code(a).is_some())
+        {
             out.push(format!("{b:?}"));
         }
     }
     out
+}
+
+/// The axis a pad with no SDL line reports a trigger on: the Linux xpad
+/// driver (and the evdev convention it follows) puts the analog triggers on
+/// ABS_Z / ABS_RZ, which gilrs's driver layout names `LeftZ` / `RightZ`.
+fn driver_trigger_axis(b: Button) -> Option<gilrs::Axis> {
+    match b {
+        Button::LeftTrigger2 => Some(gilrs::Axis::LeftZ),
+        Button::RightTrigger2 => Some(gilrs::Axis::RightZ),
+        _ => None,
+    }
+}
+
+/// Whether `b` reads from a Z axis on a driver-layout pad with these axes:
+/// only when the pad also has ABS_RX / ABS_RY (`RightStickX` / `RightStickY`).
+/// A generic HID pad without them carries its right stick on Z / Rz, centred
+/// at 0, which as a trigger would read half-pressed at rest.
+fn driver_trigger_resolves(b: Button, has_axis: &impl Fn(gilrs::Axis) -> bool) -> bool {
+    driver_trigger_axis(b).is_some_and(has_axis)
+        && has_axis(gilrs::Axis::RightStickX)
+        && has_axis(gilrs::Axis::RightStickY)
+}
+
+/// Whether a pad on gilrs's driver layout (`driver`, no SDL line) still has
+/// `b`, given which axes it reports (`has_axis`): a trigger on its Z axis
+/// ([`driver_trigger_resolves`]), a d-pad arm on hat 0 (gilrs turns the hat
+/// into the d-pad buttons itself when nothing else maps them).
+pub fn driver_fallback_resolves(
+    b: Button,
+    driver: bool,
+    has_axis: impl Fn(gilrs::Axis) -> bool,
+) -> bool {
+    if !driver {
+        return false;
+    }
+    match b {
+        Button::DPadLeft | Button::DPadRight => has_axis(gilrs::Axis::DPadX),
+        Button::DPadUp | Button::DPadDown => has_axis(gilrs::Axis::DPadY),
+        _ => driver_trigger_resolves(b, &has_axis),
+    }
+}
+
+/// A trigger's travel (0 released, 1 full) from its Z axis as gilrs reports
+/// it (-1 released, +1 full).
+pub fn trigger_from_axis(v: f32) -> f32 {
+    ((v + 1.0) * 0.5).clamp(0.0, 1.0)
+}
+
+/// The travel of `b` on a driver-layout pad that has no button for it but a
+/// trigger axis ([`driver_trigger_axis`]); `None` for every other pad and
+/// button. A trigger that has sent no report yet reads released.
+fn driver_trigger(pad: &gilrs::Gamepad<'_>, b: Button) -> Option<f32> {
+    if pad.mapping_source() != gilrs::MappingSource::Driver || pad.button_code(b).is_some() {
+        return None;
+    }
+    if !driver_trigger_resolves(b, &|a| pad.axis_code(a).is_some()) {
+        return None;
+    }
+    let axis = driver_trigger_axis(b)?;
+    Some(
+        pad.axis_data(axis)
+            .map_or(0.0, |d| trigger_from_axis(d.value())),
+    )
+}
+
+/// The travel of trigger `b` (0 released, 1 full) on any pad: its button
+/// value, or on a driver-layout pad with no button for it, its Z axis
+/// ([`driver_trigger`]).
+pub fn trigger_value(pad: &gilrs::Gamepad<'_>, b: Button) -> f32 {
+    driver_trigger(pad, b)
+        .or_else(|| pad.button_data(b).map(|d| d.value()))
+        .unwrap_or(0.0)
 }
 
 /// The warning for a pad whose camera stick or FIRE resolves to nothing
@@ -705,13 +780,17 @@ pub fn active_gamepad<'a>(
 }
 
 /// A mapped button is down: pressed, or (an analog trigger) past
-/// [`TRIGGER_PRESS`] — gilrs's own axis-to-button press is at 0.75.
+/// [`TRIGGER_PRESS`] — gilrs's own axis-to-button press is at 0.75. A pad
+/// with no SDL line reads its triggers from their Z axes
+/// ([`driver_fallback_resolves`]), pressed only past the threshold, so an
+/// axis resting at its centre (0.5 travel) never holds FIRE.
 pub fn is_down(pad: &gilrs::Gamepad<'_>, b: Button) -> bool {
     pad.is_pressed(b)
         || (matches!(b, Button::RightTrigger2 | Button::LeftTrigger2)
-            && pad
+            && (pad
                 .button_data(b)
-                .is_some_and(|d| d.value() >= TRIGGER_PRESS))
+                .is_some_and(|d| d.value() >= TRIGGER_PRESS)
+                || driver_trigger(pad, b).is_some_and(|v| v > TRIGGER_PRESS)))
 }
 
 fn dz(v: f32) -> f32 {
@@ -1057,6 +1136,91 @@ mod tests {
             .map(|(id, _)| id)
             .collect();
         assert_eq!(ids, [1, 2]);
+    }
+
+    /// An xpad-style pad with no SDL line (the driver layout: triggers on
+    /// LeftZ / RightZ, d-pad on hat 0) resolves every control of the layout;
+    /// an SDL-mapped pad gets no fallback, and a pad without those axes none.
+    #[test]
+    fn xpad_style_driver_pads_resolve_triggers_and_dpad() {
+        use gilrs::Axis as A;
+        let xpad = |a: A| {
+            matches!(
+                a,
+                A::LeftStickX
+                    | A::LeftStickY
+                    | A::RightStickX
+                    | A::RightStickY
+                    | A::LeftZ
+                    | A::RightZ
+                    | A::DPadX
+                    | A::DPadY
+            )
+        };
+        let wanted = [
+            Button::RightTrigger2,
+            Button::LeftTrigger2,
+            Button::DPadUp,
+            Button::DPadDown,
+            Button::DPadLeft,
+            Button::DPadRight,
+        ];
+        for b in wanted {
+            assert!(driver_fallback_resolves(b, true, xpad), "{b:?}");
+            assert!(
+                !driver_fallback_resolves(b, false, xpad),
+                "{b:?} on an SDL pad"
+            );
+            assert!(
+                !driver_fallback_resolves(b, true, |_| false),
+                "{b:?} with no axes"
+            );
+        }
+        for b in [Button::South, Button::RightTrigger, Button::Select] {
+            assert!(!driver_fallback_resolves(b, true, xpad), "{b:?}");
+        }
+        // A generic HID pad with its right stick on Z / Rz (no ABS_RX/RY):
+        // the d-pad still resolves, the triggers do not.
+        let hid = |a: A| {
+            matches!(
+                a,
+                A::LeftStickX | A::LeftStickY | A::LeftZ | A::RightZ | A::DPadX | A::DPadY
+            )
+        };
+        for b in [Button::RightTrigger2, Button::LeftTrigger2] {
+            assert!(!driver_fallback_resolves(b, true, hid), "{b:?} on Z sticks");
+        }
+        assert!(driver_fallback_resolves(Button::DPadUp, true, hid));
+        assert_eq!(trigger_from_axis(-1.0), 0.0);
+        assert_eq!(trigger_from_axis(1.0), 1.0);
+        assert_eq!(trigger_from_axis(0.0), 0.5);
+        assert!(trigger_from_axis(-0.2) < TRIGGER_PRESS);
+        assert!(trigger_from_axis(0.2) > TRIGGER_PRESS);
+    }
+
+    /// The GameSir dongle's xpad-mode GUID has its own line, with the same
+    /// layout as its other xpad-mode line.
+    #[test]
+    fn gamesir_xbox_360_mode_guid_has_the_xpad_layout() {
+        let line = |guid: &str| {
+            PADS_TXT
+                .lines()
+                .find(|l| l.starts_with(guid))
+                .unwrap_or_else(|| panic!("no pads.txt line for {guid}"))
+                .split(',')
+                .skip(2)
+                .collect::<Vec<_>>()
+        };
+        let mode360 = line("03000000373500007505000046010000");
+        assert_eq!(mode360, line("03000000373500009c10000046010000"));
+        for field in [
+            "lefttrigger:a2",
+            "righttrigger:a5",
+            "dpup:h0.1",
+            "dpleft:h0.8",
+        ] {
+            assert!(mode360.contains(&field), "{field}");
+        }
     }
 
     #[test]

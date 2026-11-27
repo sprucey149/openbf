@@ -828,7 +828,7 @@ fn the_proxy_reads_the_frozen_rows() {
 
 /// Two Good proxies a side, 20 m apart on the flat L, stepped 30 s at Easy
 /// and at Elite: a pin on everything the proxy's brain runs. It moves with
-/// any change to the code a proxy runs (`ai::legacy_think`), the physics
+/// any change to the code a proxy runs (the legacy think), the physics
 /// and the weapons included; such a move is declared and explained.
 /// 2026-11-13 (#168): glam's `scalar-math` (one math path on every CPU,
 /// LAN_MULTIPLAYER.md §7) moved Easy 67abfedaa0631084 -> 7efc85cee4eb5f2a and

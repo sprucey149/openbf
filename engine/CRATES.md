@@ -115,11 +115,10 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/map/render_alignment.rs` 319 — fingerprinted donor-art transforms, end stretches and donor-vertex column caps; preserves PS2 outputs, gameplay headers and collision · `Alignment`
 - `bake/src/map/render_groups.rs` 327 — fingerprinted rigid return of displaced donor vertex groups (BF1 Hoth chamber, PC Rhen Var cathedral window) and of the donor shadow vertices outlining them; PS2 never selects a recipe · `Groups`
 - `bake/src/map/render_offsets.rs` 394 — fingerprinted donor vertex displacements and face removals on final recovered drawing models; guards unknown inputs and leaves PS2 untouched · `Offsets`
-- `bake/src/map/render_offsets_table.rs` 431 — donor fingerprints, final primitive counts and fitted instruction references for Citadel and Felucia · `RECIPES`
+- `bake/src/map/render_offsets_table.rs` 430 — donor fingerprints, final primitive counts and fitted instruction references for Citadel and Felucia · `RECIPES`
 - `bake/src/map/render_offsets_data0.rs` 946 — Citadel donor-relative vertex instructions, first group.
 - `bake/src/map/render_offsets_data1.rs` 548 — Citadel donor-relative vertex instructions, second group.
-- `bake/src/map/render_offsets_data2.rs` 814 — Xbox Felucia bladder donor-relative vertex instructions (also used by PC1 inputs).
-- `bake/src/map/render_offsets_data3.rs` 814 — PC2 Felucia bladder donor-relative vertex instructions under its distinct fingerprint.
+- `bake/src/map/render_offsets_data2.rs` 814 — Felucia bladder donor-relative vertex instructions, shared by the Xbox, PC1 and PC2 fingerprints.
 - `bake/src/map/render_reassembly.rs` 613 — rejoin verified donor-only Jabba room/pipe, Polis Massa platform and capital-ship LOWD panels into canonical render models without changing simulation placements or collision · `models`
 - `bake/src/map/texture_alias.rs` 238 — bind native donor far artwork under the public corrected sky name, preserving both tiers and optional-file lifecycle · `far_alias`, `install`
 - `bake/src/map/render_recovery.rs` 646 — exact shared-LVL presentation lookup, Jabba axe sheet and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
@@ -133,7 +132,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/map/render_conform.rs` 814 — fingerprinted plant/tunnel/cliff contact drawing from active collision with donor materials/UVs, planar hangar UV continuation and accepted HIGH-stream reuse for hangar LOWD, preserving gameplay headers · `Conformation`.
 - `bake/src/map/collision_standin.rs` 719 — lower-detail missing-model stand-ins from corrected collision shapes and own-copy material/UV projection · `fit`; called only for measured absent model types.
 - `bake/src/side_classes.rs` 66 — pull BF2 SIDE/TUR.LVL classes placed by a map but absent from its LVL · `side_classes_lvl`, `pull_side_classes`; joined by `bake/src/map/content.rs`.
-- `bake/src/shell.rs` 537 — BF2 shell logo, menu movie packs and music bake · `bake_shell`, `mvs_segments`, `movie_segments`, `read_movie`; ISO fallback and transcode/output rules in the module header (`analysis/re-bf2-shell.md` §1, §4).
+- `bake/src/shell.rs` 537 — BF2 shell logo, menu movie packs and music bake · `bake_shell_with_campaign`, `mvs_segments`, `movie_segments`, `read_movie`; ISO fallback and transcode/output rules in the module header (`analysis/re-bf2-shell.md` §1, §4).
 - `bake/src/shell_pc.rs` 66 — fingerprinted PC galaxy loops and original Instant Action backdrop; preserves console screen structure.
 - `bake/src/alpha.rs` 1482 — PROVISIONAL per-draw ALPHA RULE v2 and BF1/BF2 ELF overrides · `verdict`, `census_verdict`, `bf1_elf_verdict`, `bf2_elf_verdict`, `Bf1Class`, `disc_alpha_tests`, `keep_alpha`; rule, sky exception and census switch in the module header (`analysis/re-material-flags.md`).
 - `bake/src/spec.rs` 237 — PROVISIONAL specular-pass bake and shared CORE textures/table · `spec_pass`, `SpecPass`, `pass_textures`, `bake_table`, `bake_core_texture`; alpha retention and pass rules in the module/API docs (`analysis/re-specular-pass.md`, [O]).
@@ -445,7 +444,6 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/ai/brain/ground.rs` 580 — ground bot tick pipeline, from perception and destination updates to intent, gunner, mover and settled behaviour, with last-resort descent before relocation.
 - `core/src/ai/brain/ground/tests.rs` 220 — foot aim, vehicle approach and movement witnesses against the ground brain.
 - `core/src/ai/brain/legacy.rs` 1160 — frozen priority chain for space bots and difficulty proxies.
-- `core/src/ai/brain/shadow.rs` 56 — feature-gated comparison of pads, diagnostic results, state and hash bytes on the same pre-writeback inputs.
 - `core/src/ai/brain/situation.rs` 96 — per-think Sense and per-tick Frame, Cands and Post inputs, read at their original points.
 - `core/src/ai/brain/selector.rs` 129 — fixed destination and walk priorities, numeric scores and late melee ownership.
 - `core/src/ai/brain/selector/tests.rs` 155 — exhaustive comparison of selector owners, goals, arrival and diagnostic codes against the previous chain.
@@ -519,7 +517,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/force/fall_credit_tests.rs` 480 — focused issue #173 fall-credit regressions over choke, push, pull, shove, blast and friendly fire.
 - `core/src/sim/seat_assist.rs` 269 — issue #164: controller aim assist for a human gunner in a building turret, along the seat camera ray with the seat's first weapon · `seat_magnet`.
 - `core/src/sim/seat_assist/tests.rs` 519 — issue #164 turret-gunner magnet regressions.
-- `core/src/goals.rs` 1359 — the mission script's AI goal manager (`AddAIGoal` / `DeleteAIGoal` / `ClearAIGoals`): 20 weighted slots, per-team filing, Defend/CTF/escort steering and noise/hint policies, deterministic and hashed · `AiGoals`, `GoalKind`, `GoalTarget`, `Steer`, `CtfMember`, `DefendHold`, `SLOTS`, `add`, `delete`, `clear`, `step`, `hash_into`, `defend_walk`, `defend_look`, `defend_hint`, `target_pos`; `analysis/re-conquest-goal.md` §1.
+- `core/src/goals.rs` 1359 — the mission script's AI goal manager (`AddAIGoal` / `DeleteAIGoal` / `ClearAIGoals`): 20 weighted slots, per-team filing, Defend/CTF/escort steering and noise/hint policies, deterministic and hashed · `AiGoals`, `GoalKind`, `GoalTarget`, `Steer`, `CtfMember`, `DefendHold`, `SLOTS`, `add`, `delete`, `clear`, `step`, `hash_into`, `defend_walk`, `defend_look`, `target_pos`; `analysis/re-conquest-goal.md` §1.
 - `core/src/commander/tests.rs` 1311 — the commander's tests.
 - `core/src/perception.rs` 971 — contact memory, view/LOS, target acquisition and teammate contact sharing · `scan` (enemy remote droids are candidates too: `Foe`, `alive`, `foe_motion`, `droid_view_distance`), `tell`, `choose_target`, `choose_target_with`, `los_seat`, `past_buildings`; turret muzzle/own-building/arc behavior is specified with the helpers (TURR). Fairness requires a held perception contact; see module header.
 - `core/src/perception/tests.rs` 1277 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged

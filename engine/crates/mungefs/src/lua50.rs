@@ -216,26 +216,6 @@ pub struct Proto {
     pub code: Vec<u32>,
 }
 
-impl Proto {
-    /// Collect all string constants across this prototype and its descendants.
-    pub fn string_constants(&self) -> Vec<&str> {
-        let mut out = Vec::new();
-        self.collect_strings(&mut out);
-        out
-    }
-
-    fn collect_strings<'a>(&'a self, out: &mut Vec<&'a str>) {
-        for c in &self.constants {
-            if let LuaConst::Str(s) = c {
-                out.push(s.as_str());
-            }
-        }
-        for p in &self.protos {
-            p.collect_strings(out);
-        }
-    }
-}
-
 struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,

@@ -9,7 +9,8 @@ mod display;
 #[path = "windowed/events.rs"]
 mod events;
 #[path = "windowed/split.rs"]
-mod split;
+// `pub(crate)`: the detailed bench draws its split frames with `render_views`.
+pub(crate) mod split;
 #[path = "windowed/xr.rs"]
 mod xr;
 
@@ -755,9 +756,15 @@ struct App {
     /// The governor's note for the fps counter and the net meter, while it
     /// drives a battle.
     quality_note: Option<String>,
-    /// This platform waits for the window's image in the acquire (the
-    /// governor's CPU-bound rule can trust the frame's busy time).
+    /// This platform waits for the window's image in the acquire (where
+    /// there is no thread CPU clock, the governor's CPU-bound rule can then
+    /// trust the frame's time less that wait).
     acquire_seen: bool,
+    /// The main thread's CPU ms at the governor's last frame (its busy
+    /// time is the difference), `None` when it did not run then.
+    governor_cpu: Option<f64>,
+    /// The battle's map for the governor's session-log lines (`bf2_kas2 xl`).
+    quality_map: String,
     /// What it holds this battle's frames to, read from the display once
     /// (again after a display mode change, issue #172).
     dyn_res_budget_ms: Option<f32>,
@@ -1139,6 +1146,8 @@ impl App {
             tiers: game::quality_governor::NoTiers,
             quality_note: None,
             acquire_seen: false,
+            governor_cpu: None,
+            quality_map: String::new(),
             dyn_res_budget_ms: None,
             display: Default::default(),
             profile,
@@ -1480,12 +1489,8 @@ impl App {
         let ly = dead(pad.value(gilrs::Axis::LeftStickY));
         let rx = dead(pad.value(gilrs::Axis::RightStickX));
         let ry = dead(pad.value(gilrs::Axis::RightStickY));
-        let up = pad
-            .button_data(gilrs::Button::RightTrigger2)
-            .map_or(0.0, |b| b.value());
-        let down = pad
-            .button_data(gilrs::Button::LeftTrigger2)
-            .map_or(0.0, |b| b.value());
+        let up = input::trigger_value(&pad, gilrs::Button::RightTrigger2);
+        let down = input::trigger_value(&pad, gilrs::Button::LeftTrigger2);
         let boost = if pad.is_pressed(gilrs::Button::South) {
             4.0
         } else {
@@ -2282,6 +2287,8 @@ impl App {
             "loading: upload_ms={upload_ms:.3} setup_ms={:.3}",
             setup_started.elapsed().as_secs_f64() * 1000.0
         );
+        self.quality_map =
+            game::quality_governor::map_label(&scene.dir, &scene.manifest.map, setup.xl);
         Ok((setup, walk, cube, gpu))
     }
 

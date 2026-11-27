@@ -9,7 +9,7 @@ use crate::shell_feel::{flashy, Pulse};
 use crate::shell_ps2::{FlashyRow, BAR_PAD, CENTRE_X, ROW_REVEAL, UNFOCUSED_BAR};
 use crate::spawn_draw::{item_pieces, screen_at, Anchor, PIECE_ALPHA, TITLE_PIECES};
 use crate::typography::{self, tint, Tint, BODY, ITEM, ROW_H, ROW_PITCH, TEXT_INSET, TITLE};
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 use manifest::hud::HudFont;
 use std::cell::Cell;
 
@@ -513,19 +513,11 @@ pub(crate) fn draw_stack(ctx: &mut Ctx<'_>, m: &MenuModel, anim: &Animation, siz
     if let Some(prompt) = menu::popup_prompt(m) {
         let [left, _, right, bottom] = layout.title;
         let next = layout.rows_top;
-        ctx.quad(
+        ctx.fill(
             usize::MAX,
-            &Mat4::IDENTITY,
             &s,
-            &crate::hud_draw::Quad {
-                rect: [left, bottom, right, next - 2.0],
-                uv: [0.0, 0.0, 1.0, 1.0],
-                color: [0.0, 0.0, 0.0, 0.92],
-                texture: "white",
-                additive: false,
-                shadow: false,
-                boxed: false,
-            },
+            [left, bottom, right, next - 2.0],
+            [0.0, 0.0, 0.0, 0.92],
         );
         paragraph(
             ctx,

@@ -92,6 +92,12 @@ impl Renderer {
         self.gpu_timer.as_ref().map_or(&[], |t| t.last())
     }
 
+    /// The newest timed single view's sections: with [`Renderer::time_every_view`] each split
+    /// view's own, where [`Self::gpu_sections`] sums a whole present's views.
+    pub fn gpu_view_sections(&self) -> &[(&'static str, f64)] {
+        self.gpu_timer.as_ref().map_or(&[], |t| t.last_view())
+    }
+
     /// Whether this renderer's frames are timed (`OPENBF_GPU_TIMING=1`, on an
     /// adapter with timestamp queries).
     pub fn gpu_timing_on(&self) -> bool {

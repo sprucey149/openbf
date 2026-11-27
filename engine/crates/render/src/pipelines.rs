@@ -823,8 +823,11 @@ impl Renderer {
             sky_seed: 0,
             frame_stats: FrameStats::default(),
             gpu_timer,
+            time_every_view: false,
             held_frame: None,
             acquire_ms: 0.0,
+            #[cfg(feature = "test-support")]
+            acquire_delay: None,
             cull: true,
             frame_ab: crate::FrameAb::default(),
             world_scale_now: 1.0,

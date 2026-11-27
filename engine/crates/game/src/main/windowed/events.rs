@@ -2748,29 +2748,51 @@ impl winit::application::ApplicationHandler for App {
                             // A joiner replaying the round is busy by design:
                             // its frames say nothing about the GPU.
                             let replaying = self.netplay.as_ref().is_some_and(|n| n.catching_up());
-                            // The frame's own work is its time less the last
-                            // wait for the window's image, once this platform
-                            // has shown it waits there (a frame with time to
-                            // spare under vsync does);
-                            // where it never does, the governor is told
-                            // nothing and treats every slow frame as the
-                            // GPU's (`quality_governor`, CPU-bound rule).
+                            // The frame's own work is the main thread's time on
+                            // a CPU since the last frame, where the platform
+                            // reports it. Without that clock it is the frame's
+                            // time less the wait for the window's image, and only
+                            // once this platform has shown it waits there (a
+                            // frame with time to spare under vsync does): a
+                            // driver that blocks in the present instead would
+                            // show every GPU-bound frame as busy, so there the
+                            // governor is told nothing and treats every slow
+                            // frame as the GPU's. The wait is the last present's
+                            // (its first view's, in split). `quality_governor`,
+                            // CPU-bound rule.
                             let wait = r.acquire_ms() as f32;
                             self.acquire_seen |= wait > 2.0;
-                            let busy = self
-                                .acquire_seen
-                                .then(|| (elapsed * 1000.0 - wait).fmax(0.0));
+                            let cpu_now = game::frame_profile::thread_cpu_ms();
+                            let on_cpu = cpu_now
+                                .zip(self.governor_cpu.take())
+                                .map(|(now, then)| (now - then) as f32);
+                            self.governor_cpu = cpu_now;
+                            let busy = on_cpu.or_else(|| {
+                                (cpu_now.is_none() && self.acquire_seen)
+                                    .then(|| (elapsed * 1000.0 - wait).fmax(0.0))
+                            });
                             let q = if replaying || frozen {
                                 self.governor.quality(tiers)
                             } else {
-                                self.governor.frame(elapsed * 1000.0, busy, budget, tiers)
+                                self.governor.frame(
+                                    elapsed * 1000.0,
+                                    busy,
+                                    Some(wait),
+                                    budget,
+                                    tiers,
+                                )
                             };
+                            let views = split_cells.as_ref().map_or(1, |c| c.len());
+                            for note in self.governor.take_notes() {
+                                eprintln!("{}", note.line(&self.quality_map, views));
+                            }
                             self.tiers.apply(q.tier_down);
                             self.quality_note = Some(q.label());
                             q.scale
                         }
                         Some(budget) => {
                             self.governor = Default::default();
+                            self.governor_cpu = None;
                             self.quality_note = None;
                             self.dyn_res.frame(dt * 1000.0, budget)
                         }
@@ -2778,6 +2800,7 @@ impl winit::application::ApplicationHandler for App {
                             if !auto {
                                 self.governor = Default::default();
                             }
+                            self.governor_cpu = None;
                             self.quality_note = None;
                             self.dyn_res = game::dyn_res::DynRes::default();
                             self.dyn_res_budget_ms = None;

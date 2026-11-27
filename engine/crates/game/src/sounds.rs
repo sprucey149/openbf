@@ -784,6 +784,9 @@ pub struct SoundLib {
     /// hashes of different things and may collide.
     cache: HashMap<PathBuf, audio::SoundData>,
     loops: HashMap<LoopSource, Option<audio::Voice>>,
+    /// The loops the mixer refused (a full game bus): asked again once it
+    /// has room, where a loop with no take is not.
+    refused_loops: std::collections::HashSet<LoopSource>,
     /// Each aura loop's own (gain, pitch) factors, drawn at its start
     /// ([`SoundLib::play_buff_loops`]).
     loop_draws: HashMap<LoopSource, (f32, f32)>,
@@ -998,6 +1001,7 @@ impl SoundLib {
             music_takes,
             cache: HashMap::new(),
             loops: HashMap::new(),
+            refused_loops: Default::default(),
             loop_draws: HashMap::new(),
             walker_gains: HashMap::new(),
             turret_whirs: HashMap::new(),
@@ -1149,6 +1153,7 @@ impl SoundLib {
             music_takes,
             cache: HashMap::new(),
             loops: HashMap::new(),
+            refused_loops: Default::default(),
             loop_draws: HashMap::new(),
             walker_gains: HashMap::new(),
             turret_whirs: HashMap::new(),
@@ -1501,6 +1506,7 @@ impl SoundLib {
     /// the next [`SoundLib::loop_voices`] starts the live ones again.
     pub fn stop_loops(&mut self) {
         self.loops.clear();
+        self.refused_loops.clear();
         self.ambient.clear();
     }
 

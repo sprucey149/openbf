@@ -20,13 +20,12 @@
 //! `[ours]` Hor+: the pages keep the 4:3 box at the window's centre, the help
 //! lines their edges, as the other shell pages.
 
-use crate::hud_draw::{Ctx, Frame, Panel, Quad, Screen};
+use crate::hud_draw::{Ctx, Frame, Panel, Screen};
 use crate::hud_tree::HAlign;
 use crate::input_icons::{IconSet, Prompt};
 use crate::spawn_draw::{screen_at, Anchor, HELP_DROP, ICON, ICON_GAP, SAFE_X, TITLE_PIECES};
 use crate::stats::{Page, StatsScreens, SHOWN};
 use crate::typography::{self, tint, Tint, HELP, LIST, TITLE};
-use glam::Mat4;
 
 /// Colours: the title tab's text at full alpha, grey names and numbers,
 /// yellow points, the player's row white, the cursor row's name blue, the
@@ -195,22 +194,14 @@ pub fn draw_end_movie_in(
         out: crate::hud_draw::HudFrame::default(),
         clip: None,
     };
-    ctx.quad(
+    ctx.fill(
         usize::MAX,
-        &Mat4::IDENTITY,
         &Screen {
             origin: [0.0, 0.0],
             scale: [1.0, 1.0],
         },
-        &Quad {
-            rect: [0.0, 0.0, size[0], size[1]],
-            uv: [0.0, 0.0, 1.0, 1.0],
-            color: [0.0, 0.0, 0.0, 1.0],
-            texture: "white",
-            additive: false,
-            shadow: false,
-            boxed: false,
-        },
+        [0.0, 0.0, size[0], size[1]],
+        [0.0, 0.0, 0.0, 1.0],
     );
     if movie {
         ctx.sheet(
@@ -342,20 +333,7 @@ impl Ctx<'_> {
             origin: [0.0, 0.0],
             scale: [1.0, 1.0],
         };
-        self.quad(
-            NONE,
-            &Mat4::IDENTITY,
-            &s,
-            &Quad {
-                rect: [0.0, 0.0, size[0], size[1]],
-                uv: [0.0, 0.0, 1.0, 1.0],
-                color: [0.0, 0.0, 0.0, 1.0],
-                texture: "white",
-                additive: false,
-                shadow: false,
-                boxed: false,
-            },
-        );
+        self.fill(NONE, &s, [0.0, 0.0, size[0], size[1]], [0.0, 0.0, 0.0, 1.0]);
     }
 
     /// The stats page up, alone over black.

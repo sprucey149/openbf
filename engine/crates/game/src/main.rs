@@ -79,6 +79,20 @@
 //!     --bench-player-cam          bench from the player's eye, not the overview
 //!     --bench-toggle <what>       `shadows` or `soldier-lod`: time that feature off
 //!                                 and on in alternating blocks of the same frames
+//!     --bench-views <n>           with OPENBF_BENCH_DETAIL: n local players, each
+//!                                 frame drawn as the split window draws it, one
+//!                                 view per cell; rows per view (GPU sections too)
+//!     --bench-scale <f>           the world's render scale for the bench
+//!     --xl                        with --mission: the shell's XL population
+//!     --team-size <pct>           the shell's Team Size percentage
+//!     --bench-pipelined           with OPENBF_BENCH_DETAIL: frames as the window runs them,
+//!                                 ticks on the wall clock, no wait for the GPU after a
+//!                                 view (two frames in flight), the split UI with --hud;
+//!                                 frame and main-thread CPU percentiles, clocks and power
+//!     --bench-seconds <s>         --bench-pipelined's length (default 90)
+//!     --bench-seats <who>         who drives the local players' pads: `idle` (default),
+//!                                 `script` (a fixed walk-and-fire) or `ai` (the bot brain
+//!                                 thinks for each seat, behind the spawn screens)
 //!   --render-icon <out.png> [--assets <dir>] [--size <px>]
 //!                                 headless: the app icon, a clone trooper's
 //!                                 helmet from the bake on a transparent
@@ -285,6 +299,24 @@ struct ViewerArgs {
     bench_player_cam: bool,
     /// `--bench-toggle`: compare one feature off and on (`game::bench::Toggle`).
     bench_toggle: Option<&'static str>,
+    /// `--bench-views <1..4>`: with OPENBF_BENCH_DETAIL, seat that many local players and draw
+    /// each frame as the splitscreen window does, one view per cell (`render_view`).
+    bench_views: usize,
+    /// `--bench-scale <f>`: the world's render scale for the bench (`set_world_scale`).
+    bench_scale: Option<f32>,
+    /// `--xl`: the round's population as the shell's XL mode sets it (with `--mission`).
+    xl: bool,
+    /// `--team-size <pct>`: the shell's Team Size percentage.
+    team_size: Option<u32>,
+    /// `--bench-pipelined`: with OPENBF_BENCH_DETAIL, frames as the window runs them.
+    bench_pipelined: bool,
+    /// `--bench-seconds <s>`: the pipelined run's length.
+    bench_seconds: f32,
+    /// `--bench-governor`: the pipelined run's scale follows automatic quality
+    /// (`game::quality_governor`) as the window's does, from `--bench-scale` or 1.0.
+    bench_governor: bool,
+    /// `--bench-seats <idle|script|ai>`: who drives the local players' pads.
+    bench_seats: &'static str,
 }
 
 /// A player entry point (the shell, a LAN launch) with its session log
@@ -534,6 +566,14 @@ fn main() -> Result<()> {
                 scene_report: false,
                 bench_player_cam: false,
                 bench_toggle: None,
+                bench_views: 1,
+                bench_scale: None,
+                xl: false,
+                team_size: None,
+                bench_pipelined: false,
+                bench_seconds: 90.0,
+                bench_governor: false,
+                bench_seats: "idle",
                 ai: None,
                 ai_cap: None,
                 tickets: 250,
@@ -554,6 +594,8 @@ fn main() -> Result<()> {
                 cam: GOLDEN_CAM,
                 size: (1280, 720),
             };
+            // Flags only the detailed bench reads; any of them without it is refused.
+            let mut detail_only: Vec<&str> = Vec::new();
             while let Some(f) = it.next() {
                 match f.as_str() {
                     "--headless" => v.headless = true,
@@ -654,6 +696,41 @@ fn main() -> Result<()> {
                     "--bench" => v.bench = true,
                     "--no-cull" => v.no_cull = true,
                     "--bench-player-cam" => v.bench_player_cam = true,
+                    "--bench-views" => {
+                        detail_only.push("--bench-views");
+                        v.bench_views = it.next().context("--bench-views <1..4>")?.parse()?;
+                        if !(1..=4).contains(&v.bench_views) {
+                            bail!("--bench-views takes 1 to 4");
+                        }
+                    }
+                    "--bench-scale" => {
+                        v.bench_scale = Some(it.next().context("--bench-scale <f>")?.parse()?)
+                    }
+                    "--xl" => v.xl = true,
+                    "--bench-pipelined" => {
+                        detail_only.push("--bench-pipelined");
+                        v.bench_pipelined = true
+                    }
+                    "--bench-governor" => {
+                        detail_only.push("--bench-governor");
+                        v.bench_governor = true
+                    }
+                    "--bench-seconds" => {
+                        detail_only.push("--bench-seconds");
+                        v.bench_seconds = it.next().context("--bench-seconds <s>")?.parse()?
+                    }
+                    "--bench-seats" => {
+                        detail_only.push("--bench-seats");
+                        v.bench_seats = match it.next().context("--bench-seats <who>")?.as_str() {
+                            "idle" => "idle",
+                            "script" => "script",
+                            "ai" => "ai",
+                            other => bail!("--bench-seats takes idle, script or ai, not {other}"),
+                        }
+                    }
+                    "--team-size" => {
+                        v.team_size = Some(it.next().context("--team-size <pct>")?.parse()?)
+                    }
                     "--bench-toggle" => {
                         v.bench_toggle =
                             Some(match it.next().context("--bench-toggle <what>")?.as_str() {
@@ -681,8 +758,23 @@ fn main() -> Result<()> {
             {
                 bail!("--vr requires an interactive game");
             }
-            if v.capture_frame.is_some() && !v.headless && v.bench_toggle.is_none() {
-                bail!("--capture-frame requires --headless or --bench-toggle");
+            // The detailed bench (OPENBF_BENCH_DETAIL) captures its last frame too.
+            let detailed = v.bench && std::env::var_os("OPENBF_BENCH_DETAIL").is_some();
+            if v.capture_frame.is_some() && !v.headless && v.bench_toggle.is_none() && !detailed {
+                bail!("--capture-frame requires --headless, --bench-toggle or OPENBF_BENCH_DETAIL");
+            }
+            if let (false, Some(flag)) = (detailed, detail_only.first()) {
+                bail!("{flag} requires --bench with OPENBF_BENCH_DETAIL");
+            }
+            // The detailed bench captures only a frame it draws.
+            let draws = v.bench_frames > 0 || v.bench_pipelined;
+            if v.capture_frame.is_some()
+                && detailed
+                && !v.headless
+                && v.bench_toggle.is_none()
+                && !draws
+            {
+                bail!("--capture-frame with OPENBF_BENCH_DETAIL requires --bench-frames or --bench-pipelined");
             }
             let assets_root = v
                 .map
@@ -942,8 +1034,8 @@ impl BattleSetup {
             targets: v.targets,
             ai: v.ai,
             ai_cap: v.ai_cap,
-            team_size_pct: None,
-            xl: false,
+            team_size_pct: v.team_size.or(v.xl.then_some(100)),
+            xl: v.xl,
             tickets: v.tickets,
             tickets_set: v.tickets_set,
             ticket_pct: 100,

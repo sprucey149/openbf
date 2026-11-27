@@ -579,6 +579,56 @@ impl WorkerCache {
         }
         self.catalogs.as_ref().unwrap()
     }
+
+    /// What a full inspection reads, loading the stock catalogs and the LVL
+    /// facts cache on first use.
+    fn deep_context<'a>(
+        &'a mut self,
+        data_dir: &Path,
+        stock: Option<&Path>,
+        selections: &'a TargetSelections,
+    ) -> ScanContext<'a> {
+        let _ = self.catalogs(stock);
+        if self.facts.is_none() {
+            self.facts = Some(FactsCache::load(data_dir));
+        }
+        ScanContext {
+            catalogs: self.catalogs.as_ref().unwrap(),
+            selections,
+            hashes: self.hashes.as_ref().unwrap(),
+            facts: self.facts.as_ref().unwrap(),
+        }
+    }
+
+    /// Record `info` in the mod index; a folder that could not be stamped
+    /// is not recorded.
+    fn remember(
+        &mut self,
+        tree_stamp: String,
+        catalog_digest: &str,
+        choices: BTreeMap<String, TargetChoice>,
+        info: &DiscoveredMod,
+    ) {
+        if tree_stamp.is_empty() {
+            return;
+        }
+        self.index.as_mut().unwrap().insert(
+            info.id.clone(),
+            tree_stamp,
+            catalog_digest.to_owned(),
+            choices,
+            info.clone(),
+        );
+    }
+}
+
+/// The warnings and unsupported notes a ready cache recorded; empty for any
+/// other status.
+fn ready_cache_notes(status: &ModCacheStatus, cache_dir: &Path) -> (Vec<String>, Vec<String>) {
+    if !matches!(status, ModCacheStatus::Ready) {
+        return Default::default();
+    }
+    ModCacheMeta::load(cache_dir).map_or_else(Default::default, |m| (m.warnings, m.unsupported))
 }
 
 /// Fast path: when a mod already has a validated `cache_meta.ron` whose
@@ -768,15 +818,7 @@ fn scan_mods_with_cache(
             &catalog_digest,
             max_mtime,
         ) {
-            if !tree_stamp.is_empty() {
-                cache.index.as_mut().unwrap().insert(
-                    info.id.clone(),
-                    tree_stamp,
-                    catalog_digest.clone(),
-                    choices,
-                    info.clone(),
-                );
-            }
+            cache.remember(tree_stamp, &catalog_digest, choices, &info);
             mods.insert(info.id.clone(), (info, true));
             continue;
         }
@@ -796,34 +838,16 @@ fn scan_mods_with_cache(
     }
 
     if !deep_misses.is_empty() {
-        let _ = cache.catalogs(env.stock.as_deref());
-        if cache.facts.is_none() {
-            cache.facts = Some(FactsCache::load(data_dir));
-        }
-        let mut newly_inspected = Vec::with_capacity(deep_misses.len());
-        {
-            let ctx = ScanContext {
-                catalogs: cache.catalogs.as_ref().unwrap(),
-                selections: &selections,
-                hashes: cache.hashes.as_ref().unwrap(),
-                facts: cache.facts.as_ref().unwrap(),
-            };
-            for (entry, tree_stamp) in deep_misses {
-                let info = inspect_folder_entry(entry, &ctx);
-                newly_inspected.push((info, tree_stamp));
-            }
-        }
+        let newly_inspected: Vec<(DiscoveredMod, String)> = {
+            let ctx = cache.deep_context(data_dir, env.stock.as_deref(), &selections);
+            deep_misses
+                .into_iter()
+                .map(|(entry, tree_stamp)| (inspect_folder_entry(entry, &ctx), tree_stamp))
+                .collect()
+        };
         for (info, tree_stamp) in newly_inspected {
-            if !tree_stamp.is_empty() {
-                let choices = selections.for_mod(&info.id);
-                cache.index.as_mut().unwrap().insert(
-                    info.id.clone(),
-                    tree_stamp,
-                    catalog_digest.clone(),
-                    choices,
-                    info.clone(),
-                );
-            }
+            let choices = selections.for_mod(&info.id);
+            cache.remember(tree_stamp, &catalog_digest, choices, &info);
             mods.insert(info.id.clone(), (info, true));
         }
         cache.facts.as_ref().unwrap().save();
@@ -886,14 +910,11 @@ fn run_scan(env: &ModsEnv, cache: &mut WorkerCache, state: &Arc<Mutex<ModsSnapsh
                     .map_or((0, String::new(), None), |m| {
                         (m.progress_pct, m.progress_msg.clone(), m.convert_started_at)
                     });
-                let (cache_warnings, cache_unsupported) =
-                    if inspected && matches!(cache_status, ModCacheStatus::Ready) {
-                        let cache_dir = mod_cache_path(data_dir, &info.namespace);
-                        ModCacheMeta::load(&cache_dir)
-                            .map_or_else(Default::default, |m| (m.warnings, m.unsupported))
-                    } else {
-                        Default::default()
-                    };
+                let (cache_warnings, cache_unsupported) = if inspected {
+                    ready_cache_notes(&cache_status, &mod_cache_path(data_dir, &info.namespace))
+                } else {
+                    Default::default()
+                };
                 next_mods.insert(
                     id,
                     DiscoveredModState {
@@ -974,28 +995,11 @@ fn run_inspect_mods(
             cached
         } else {
             did_deep = true;
-            let _ = cache.catalogs(env.stock.as_deref());
-            if cache.facts.is_none() {
-                cache.facts = Some(FactsCache::load(data_dir));
-            }
             let info = {
-                let ctx = ScanContext {
-                    catalogs: cache.catalogs.as_ref().unwrap(),
-                    selections: &selections,
-                    hashes: cache.hashes.as_ref().unwrap(),
-                    facts: cache.facts.as_ref().unwrap(),
-                };
+                let ctx = cache.deep_context(data_dir, env.stock.as_deref(), &selections);
                 inspect_folder_entry(entry, &ctx)
             };
-            if !tree_stamp.is_empty() {
-                cache.index.as_mut().unwrap().insert(
-                    info.id.clone(),
-                    tree_stamp,
-                    catalog_digest.clone(),
-                    choices,
-                    info.clone(),
-                );
-            }
+            cache.remember(tree_stamp, &catalog_digest, choices, &info);
             info
         };
 
@@ -1007,13 +1011,8 @@ fn run_inspect_mods(
         } else {
             cache_status_for(&info, data_dir, &snap.failed_fingerprints)
         };
-        let (cache_warnings, cache_unsupported) = if matches!(cache_status, ModCacheStatus::Ready) {
-            let cache_dir = mod_cache_path(data_dir, &info.namespace);
-            ModCacheMeta::load(&cache_dir)
-                .map_or_else(Default::default, |m| (m.warnings, m.unsupported))
-        } else {
-            Default::default()
-        };
+        let (cache_warnings, cache_unsupported) =
+            ready_cache_notes(&cache_status, &mod_cache_path(data_dir, &info.namespace));
         if let Some(m) = snap.mods.get_mut(mod_id) {
             m.discovered = info;
             m.inspected = true;
@@ -1146,12 +1145,7 @@ fn run_convert_queue(
         match result {
             Ok(()) => {
                 let status = converted_status(&cache_dir, &fp, &key, &bake);
-                let (cache_warnings, cache_unsupported) = if matches!(status, ModCacheStatus::Ready) {
-                    ModCacheMeta::load(&cache_dir)
-                        .map_or_else(Default::default, |m| (m.warnings, m.unsupported))
-                } else {
-                    Default::default()
-                };
+                let (cache_warnings, cache_unsupported) = ready_cache_notes(&status, &cache_dir);
                 if let ModCacheStatus::Failed(err) = &status {
                     snap.failed_fingerprints
                         .insert(mod_id.clone(), (fp.clone(), err.clone()));

@@ -746,6 +746,25 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// A flat `rgba` fill of `rect` in the screen `s`: the white texture, no transform,
+    /// shadow, additive blend or hit box.
+    pub(crate) fn fill(&mut self, elem: usize, s: &Screen, rect: [f32; 4], rgba: [f32; 4]) {
+        self.quad(
+            elem,
+            &Mat4::IDENTITY,
+            s,
+            &Quad {
+                rect,
+                uv: [0.0, 0.0, 1.0, 1.0],
+                color: rgba,
+                texture: "white",
+                additive: false,
+                shadow: false,
+                boxed: false,
+            },
+        );
+    }
+
     fn hint_markers(&mut self, f: &Frame) {
         let scale = f.scale();
         let hud = self.hud;
@@ -1610,22 +1629,14 @@ fn draw_tree(hud: &Hud, art: &HudArt, f: &Frame, skip: Option<usize>) -> HudFram
             ctx.out = crate::hud::draw_round_end(result, f);
         }
         if hud.banner_fade > 0.0 {
-            ctx.quad(
+            ctx.fill(
                 usize::MAX,
-                &Mat4::IDENTITY,
                 &Screen {
                     origin: [0.0, 0.0],
                     scale: [1.0, 1.0],
                 },
-                &Quad {
-                    rect: [0.0, 0.0, size[0], size[1]],
-                    uv: [0.0, 0.0, 1.0, 1.0],
-                    color: [0.0, 0.0, 0.0, hud.banner_fade],
-                    texture: "white",
-                    additive: false,
-                    shadow: false,
-                    boxed: false,
-                },
+                [0.0, 0.0, size[0], size[1]],
+                [0.0, 0.0, 0.0, hud.banner_fade],
             );
         }
         return ctx.out;
@@ -1644,22 +1655,14 @@ fn draw_tree(hud: &Hud, art: &HudArt, f: &Frame, skip: Option<usize>) -> HudFram
         None => true,
     };
     if tree && hud.damage_flash > 0.0 {
-        ctx.quad(
+        ctx.fill(
             usize::MAX,
-            &Mat4::IDENTITY,
             &Screen {
                 origin: [0.0, 0.0],
                 scale: [1.0, 1.0],
             },
-            &Quad {
-                rect: [0.0, 0.0, size[0], size[1]],
-                uv: [0.0, 0.0, 1.0, 1.0],
-                color: [1.0, 0.0, 0.0, hud.damage_flash],
-                texture: "white",
-                additive: false,
-                shadow: false,
-                boxed: false,
-            },
+            [0.0, 0.0, size[0], size[1]],
+            [1.0, 0.0, 0.0, hud.damage_flash],
         );
     }
     // The sniper scope (`crate::hud_scope`): under the tree, so the target

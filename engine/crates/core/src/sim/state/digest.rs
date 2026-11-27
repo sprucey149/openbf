@@ -144,6 +144,7 @@ impl Sim {
             bot_census: _,
             think_hist: _,
             think_threads: _,
+            team_rows_cache: _,
             // Trait objects with no data view (module header).
             hero_rider_frames: _,
             tow_frames: _,

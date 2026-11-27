@@ -570,6 +570,7 @@ fn lib() -> SoundLib {
         music_takes: HashMap::new(),
         cache: HashMap::new(),
         loops: HashMap::new(),
+        refused_loops: Default::default(),
         loop_draws: HashMap::new(),
         walker_gains: HashMap::new(),
         turret_whirs: HashMap::new(),
@@ -1926,4 +1927,51 @@ fn one_local_listeners_hand_the_same_rows_as_listener() {
     let (a, b) = (rows(&old), rows(&new));
     assert!(!a.is_empty());
     assert_eq!(a, b);
+}
+
+/// An engine loop the full game bus refused starts once the bus has room
+/// (a 4-player XL round fills it); before, it stayed silent until its
+/// vehicle left range.
+#[test]
+fn a_loop_refused_by_a_full_bus_starts_when_there_is_room() {
+    let f = VoiceFixture::new("refused_loop");
+    let Some(mut audio) = audio::Audio::new() else {
+        eprintln!("SKIP: no audio device");
+        return;
+    };
+    let mut sl = f.load();
+    let filler = audio::decode(&f.0.join("sounds/b/1.wav")).unwrap();
+    for _ in 0..audio::GAME_SOUND_CAPACITY {
+        audio.play_oneshot(&filler, -100.0, 4.0, 0.0);
+    }
+    assert_eq!(audio.num_sounds(), audio::GAME_SOUND_CAPACITY);
+    let voice = crate::engine_sound::Voice {
+        vehicle: 7,
+        soldier: false,
+        layer: 0,
+        record: 0,
+        sound: fnv1a_lowercase("rep_test_voice"),
+        pos: Vec3::ZERO,
+        gain_factor: 1.0,
+        pitch_factor: 1.0,
+        speed: 0.0,
+    };
+    let listener = Listener::new(Vec3::ZERO, 0.0);
+    let source = LoopSource::Engine(7, 0);
+    sl.loop_voices(&mut audio, std::slice::from_ref(&voice), &listener);
+    assert!(matches!(sl.loops.get(&source), Some(None)));
+    assert!(sl.refused_loops.contains(&source));
+    // Still full: not asked again.
+    sl.loop_voices(&mut audio, std::slice::from_ref(&voice), &listener);
+    assert!(matches!(sl.loops.get(&source), Some(None)));
+    // The one-shots (a quarter second at rate 4) end and free the bus.
+    let t = std::time::Instant::now();
+    while audio.num_sounds() > 0 {
+        assert!(t.elapsed().as_secs() < 5, "{} left", audio.num_sounds());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    sl.loop_voices(&mut audio, std::slice::from_ref(&voice), &listener);
+    assert!(matches!(sl.loops.get(&source), Some(Some(_))));
+    assert!(!sl.refused_loops.contains(&source));
+    assert_eq!(audio.num_sounds(), 1);
 }

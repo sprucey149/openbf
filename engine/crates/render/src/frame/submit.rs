@@ -207,6 +207,8 @@ impl Renderer {
         let guard = crate::affine::guard(aspect);
         let sun_direction = self.lighting.sun_dir.try_normalize();
         let use_sun_shadow = self.sun_shadow.is_some() && sun_direction.is_some();
+        // A small split cell draws the smaller sun map (`sun_shadow::cell_map`).
+        let shadow_cell = slot.is_some_and(|s| crate::sun_shadow::cell_map(s.rect, self.size()));
         if !use_sun_shadow {
             self.shadows.prepare(
                 &self.device,
@@ -379,7 +381,7 @@ impl Renderer {
             .as_ref()
             .zip(sun_direction)
             .map(|(shadow, sun)| {
-                let light_clip = shadow.light_clip(eye, sun);
+                let light_clip = shadow.light_clip(eye, sun, shadow_cell);
                 shadow.prepare(self, light_clip, view_proj, eye, globals.material_time);
                 frustum::Frustum::from_view_proj(&light_clip)
             });
@@ -858,6 +860,12 @@ impl Renderer {
 
         // Acquire the frame's color view.
         let acquire = std::time::Instant::now();
+        #[cfg(feature = "test-support")]
+        if first {
+            if let Some(wait) = self.acquire_delay {
+                std::thread::sleep(wait);
+            }
+        }
         // A later split view of a present takes the image the first one acquired; if the first
         // one found the surface lost, the whole present is skipped.
         let held = if first {
@@ -891,7 +899,11 @@ impl Renderer {
             (_, _, Target::Headless { texture, view, .. }) => (texture, view.clone()),
             _ => unreachable!("a window frame was acquired"),
         };
-        self.acquire_ms = acquire.elapsed().as_secs_f64() * 1000.0;
+        // Only the view that acquired the image waited for it: a later split view takes the held
+        // image in no time and would hide the present's wait from the quality governor.
+        if first {
+            self.acquire_ms = acquire.elapsed().as_secs_f64() * 1000.0;
+        }
 
         let mut draw_calls = 0u32;
         let mut encoder = self
@@ -901,10 +913,19 @@ impl Renderer {
             });
         // The GPU timer, when on (`gpu_timer.rs`): out of `self` for the
         // frame, so the passes can mark it while they borrow the rest.
-        // One timed view per present: the timer's ring is per present.
-        let mut timer = if first { self.gpu_timer.take() } else { None };
+        // Only a present's first view is timed, unless `time_every_view` is on (the bench, or
+        // the window under `OPENBF_GPU_TIMING=1`): then every view is, and the timer sums them
+        // per present.
+        let mut timer = if first || self.time_every_view {
+            self.gpu_timer.take()
+        } else {
+            None
+        };
+        // Under `time_every_view` each view is a part of its present's sum; else the one
+        // timed view is its present whole.
+        let ends_present = !self.time_every_view || slot.is_none_or(|s| s.last);
         if let Some(t) = &mut timer {
-            t.begin(&self.device, &mut encoder);
+            t.begin(&self.device, &mut encoder, first || !self.time_every_view);
         }
         let sun_pass = self.sun_shadow.as_ref().filter(|_| shadow_before.is_some());
         if let Some(shadow) = sun_pass {
@@ -914,6 +935,7 @@ impl Renderer {
                 draws,
                 &shadow_casters,
                 first_shadow_instance,
+                shadow_cell,
             );
             if let Some(t) = &mut timer {
                 t.mark(&mut encoder, "sun shadow depth");
@@ -931,6 +953,18 @@ impl Renderer {
             self.world_scale
                 .target(&self.device, self.format, [width, height])
         });
+        // [ours] A split view's bloom composite writes a second world target rather than
+        // copying the frame first (`bloom.rs`); the passes after it draw there.
+        let bloom_on = bloom && !ab.skips("bloom");
+        let bloom_out = match (&world_target, slot) {
+            (Some(t), Some(_)) if bloom_on => {
+                let out = self.world_scale.bloom_out(&self.device, self.format, t);
+                self.bloom
+                    .prepare_direct(&self.device, self.format, &t.texture);
+                Some(out)
+            }
+            _ => None,
+        };
         let frame_view = view.clone();
         let (frame_texture, view) = match &world_target {
             Some(t) => (&t.texture, t.view.clone()),
@@ -1123,7 +1157,13 @@ impl Renderer {
                         mark(&mut timer, &mut pass, l);
                     }
                     drop(pass);
-                    draw_calls += shadow.composite(self, &mut encoder, frame_texture, depth_view);
+                    draw_calls += shadow.composite(
+                        self,
+                        &mut encoder,
+                        frame_texture,
+                        depth_view,
+                        shadow_cell,
+                    );
                     pass = continue_pass(&mut encoder, &view, depth_view, "after sun shadows");
                     mark(&mut timer, &mut pass, "sun shadow composite");
                     pass.set_bind_group(0, &self.globals_bg, &[]);
@@ -1522,8 +1562,12 @@ impl Renderer {
                     draw_calls += 1;
                 }
             }
+            drop(pass);
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "particle blur");
+            }
         }
-        if bloom && !ab.skips("bloom") {
+        if bloom_on {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("bloom gather"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1586,6 +1630,7 @@ impl Renderer {
                     draw_calls += 1;
                 }
             }
+            mark(&mut timer, &mut pass, "bloom gather");
             drop(pass);
             draw_calls += self.sun_flare_pass(
                 &mut encoder,
@@ -1597,11 +1642,35 @@ impl Renderer {
                 true,
                 projection,
             );
-            draw_calls += self.bloom_pass(&mut encoder, frame_texture, &view);
             if let Some(t) = &mut timer {
-                t.mark(&mut encoder, "bloom");
+                t.mark(&mut encoder, "bloom flare");
             }
+            draw_calls += self.bloom_pass(
+                &mut encoder,
+                frame_texture,
+                &view,
+                bloom_out.as_ref().map(|o| &o.view),
+                &mut timer,
+            );
         }
+        // A split view carries on in the bloom's own target.
+        let (frame_texture, view, frame_display_view, world_target) = match &bloom_out {
+            Some(o) => (
+                &o.texture,
+                o.view.clone(),
+                Some(o.texture.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(self.format.remove_srgb_suffix()),
+                    ..Default::default()
+                })),
+                Some(o),
+            ),
+            None => (
+                frame_texture,
+                view,
+                frame_display_view,
+                world_target.as_ref(),
+            ),
+        };
         if let Some(frame_display_view) = &frame_display_view {
             draw_calls += self.sun_flare_pass(
                 &mut encoder,
@@ -1697,7 +1766,7 @@ impl Renderer {
             self.shadows.clear();
         }
         if let Some(mut t) = timer {
-            t.submitted();
+            t.submitted(ends_present);
             self.gpu_timer = Some(t);
         }
         // Not the last split view: keep the image for the next one.

@@ -16,6 +16,7 @@ members = [
     "crates/extensions",
     "crates/openbf_vr",
 ]
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -78,3 +79,9 @@ opt-level = 2
 
 [profile.dev.package.core]
 opt-level = 2
+
+# gilrs with one change: its force-feedback thread stops rewriting idle pads
+# every 50 ms (vendor/gilrs/OPENBF.md).
+[patch.crates-io]
+gilrs = { path = "vendor/gilrs" }
+

@@ -251,40 +251,6 @@ impl Sim {
             .position(|entry| entry.team == team)
     }
 
-    /// Spawn up to `count` ambush bots of `team` at `nodes`. Main armies (`0..2`)
-    /// draw from `Sim::spawn_ai`; native/auxiliary teams (`>= 2`) register a
-    /// `NativeSpawnPost` for capacity and consume queued templates (or clone live
-    /// team slot templates when the initial pool is empty).
-    pub fn spawn_native_ambush(
-        &mut self,
-        team: u8,
-        count: u32,
-        nodes: &[(Vec3, f32)],
-    ) -> Vec<crate::unit::UnitHandle> {
-        let mut spawned = Vec::new();
-        if count == 0 || nodes.is_empty() {
-            return spawned;
-        }
-        if team < 2 {
-            for i in 0..count as usize {
-                let (pos, yaw) = nodes[i % nodes.len()];
-                if let Some(h) = self.spawn_ai(team, pos, yaw) {
-                    spawned.push(h);
-                }
-            }
-            return spawned;
-        }
-        let Some(entry) = self.native_team_index(team) else {
-            return spawned;
-        };
-        self.native_teams[entry].spawn_posts.push(NativeSpawnPost {
-            count,
-            nodes: nodes.to_vec(),
-        });
-        self.spawn_native_members(entry, count, nodes, &mut spawned, false);
-        spawned
-    }
-
     /// A mission script's `SpawnCharacter` (B2 binding `FUN_001916e8`): one
     /// native member of `team` enters at `node` and nothing more - no spawn
     /// post is left behind, so a dead ambusher stays dead.

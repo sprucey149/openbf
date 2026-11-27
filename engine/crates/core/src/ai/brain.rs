@@ -16,11 +16,7 @@ mod ground;
 pub(super) mod intent;
 mod legacy;
 pub(super) mod selector;
-#[cfg(feature = "brain-shadow")]
-pub(crate) mod shadow;
 pub(super) mod situation;
-
-pub use legacy::think as legacy_think;
 
 #[derive(Clone, Copy)]
 pub(crate) struct UnitRules {

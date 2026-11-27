@@ -5,6 +5,11 @@
 //! [ours] The 4x downsample averages all 16 texels of a block (the PS2 takes one
 //! bilinear sample of the central 2x2, `re-glow.md` §2.2).
 //! Native quarter-size buffers replace the fixed PS2 128×112 buffers.
+//! [ours] Split views (issue #194) skip the frame copy: the composite reads the
+//! view's world target and writes a second one (`WorldScale::bloom_out`), and
+//! the passes that overwrite every texel load instead of clearing. The image is
+//! the same; the copy and the clears cost about 1 ms a frame with 4 views on a
+//! Radeon 780M at 4K (`analysis/plan/perf-4-result.md`).
 use crate::{bindings, pipelines::PipelineDesc, Renderer};
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -72,6 +77,8 @@ struct Dest {
     extract_bg: wgpu::BindGroup,
     blur_bg: Vec<wgpu::BindGroup>,
     composite_bg: wgpu::BindGroup,
+    /// The split views' composite inputs: the world target it reads in place of `copy`.
+    direct: Option<(wgpu::Texture, wgpu::BindGroup)>,
     size: [u32; 2],
     settings: Bloom,
 }
@@ -156,6 +163,28 @@ impl BloomState {
         }
     }
 }
+impl BloomState {
+    /// A split view's composite reads `frame` (a world target, `WorldScale::bloom_out`)
+    /// instead of a copy of it. After [`Renderer::prepare_bloom`].
+    pub(crate) fn prepare_direct(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        frame: &wgpu::Texture,
+    ) {
+        let d = self.dests.last().expect("prepared bloom");
+        if d.direct.as_ref().is_some_and(|(t, _)| t == frame) {
+            return;
+        }
+        let view = frame.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(format.remove_srgb_suffix()),
+            ..Default::default()
+        });
+        let group = inputs(device, self, d.settings, &d.ping[0], 0.0, &view);
+        let d = self.dests.last_mut().expect("prepared bloom");
+        d.direct = Some((frame.clone(), group));
+    }
+}
 impl Renderer {
     pub fn set_bloom(&mut self, settings: Option<Bloom>) {
         self.bloom.settings = settings.and_then(Bloom::checked);
@@ -194,28 +223,7 @@ impl Renderer {
             ..Default::default()
         });
         let group = |source: &wgpu::TextureView, offset: f32| {
-            use wgpu::util::DeviceExt;
-            let data = [settings.threshold, settings.tap(), offset, 0.0];
-            let params = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("bloom params"),
-                    contents: bytemuck::cast_slice(&data),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-            crate::made::bind_group(
-                &self.device,
-                &wgpu::BindGroupDescriptor {
-                    label: Some("bloom inputs"),
-                    layout: &b.bgl,
-                    entries: &[
-                        bindings::texture_view(0, source),
-                        bindings::sampler(1, &b.sampler),
-                        bindings::entire_buffer(2, &params),
-                        bindings::texture_view(3, &view),
-                    ],
-                },
-            )
+            inputs(&self.device, b, settings, source, offset, &view)
         };
         let extract_bg = group(&raw, 0.0);
         let blur_bg = (0..settings.passes * 2)
@@ -236,60 +244,136 @@ impl Renderer {
                 extract_bg,
                 blur_bg,
                 composite_bg,
+                direct: None,
                 size: [w, h],
                 settings,
             },
         );
         true
     }
+    /// Drop the direct bind groups' world targets with the world-scale targets.
+    pub(crate) fn forget_bloom_direct(&mut self) {
+        for d in &mut self.bloom.dests {
+            d.direct = None;
+        }
+    }
     pub(crate) fn bloom_gather_view(&self) -> &wgpu::TextureView {
         &self.bloom.dests.last().expect("prepared bloom").raw
     }
+    /// Extract, blur and composite over `view` (`src`'s texture). A split view passes `out`
+    /// (after [`BloomState::prepare_direct`] on `src`): the composite reads `src` and
+    /// writes `out`, and the extract and blur, which write every texel, load rather than clear.
     pub(crate) fn bloom_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         src: &wgpu::Texture,
         view: &wgpu::TextureView,
+        out: Option<&wgpu::TextureView>,
+        timer: &mut Option<crate::gpu_timer::GpuTimer>,
     ) -> u32 {
         let b = &self.bloom;
         let d = b.dests.last().expect("prepared bloom");
-        encoder.copy_texture_to_texture(
-            src.as_image_copy(),
-            d.copy.as_image_copy(),
-            wgpu::Extent3d {
-                width: d.size[0],
-                height: d.size[1],
-                depth_or_array_layers: 1,
-            },
-        );
-        let mut fullscreen =
-            |target: &wgpu::TextureView, pipeline: &wgpu::RenderPipeline, bg: &wgpu::BindGroup| {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("bloom"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: target,
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
+        let mut mark = |encoder: &mut wgpu::CommandEncoder, label| {
+            if let Some(t) = timer {
+                t.mark(encoder, label);
+            }
+        };
+        let (load, composite_target, composite_bg) = match out {
+            Some(out) => {
+                // The caller draws on in `out`, so the composite must write it.
+                let (_, bg) = d
+                    .direct
+                    .as_ref()
+                    .filter(|(frame, _)| frame == src)
+                    .expect("prepare_direct on this frame before a split bloom");
+                (true, out, bg)
+            }
+            None => {
+                encoder.copy_texture_to_texture(
+                    src.as_image_copy(),
+                    d.copy.as_image_copy(),
+                    wgpu::Extent3d {
+                        width: d.size[0],
+                        height: d.size[1],
+                        depth_or_array_layers: 1,
+                    },
+                );
+                mark(encoder, "bloom copy");
+                (false, view, &d.composite_bg)
+            }
+        };
+        let fullscreen = |encoder: &mut wgpu::CommandEncoder,
+                          target: &wgpu::TextureView,
+                          pipeline: &wgpu::RenderPipeline,
+                          bg: &wgpu::BindGroup,
+                          load: bool| {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("bloom"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: if load {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
                         },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-                pass.set_pipeline(pipeline);
-                pass.set_bind_group(0, bg, &[]);
-                pass.draw(0..3, 0..1);
-            };
-        fullscreen(&d.ping[0], &b.extract, &d.extract_bg);
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bg, &[]);
+            pass.draw(0..3, 0..1);
+        };
+        fullscreen(encoder, &d.ping[0], &b.extract, &d.extract_bg, load);
+        mark(encoder, "bloom extract");
         for (n, bg) in d.blur_bg.iter().enumerate() {
-            fullscreen(&d.ping[(n + 1) % 2], &b.blur, bg);
+            fullscreen(encoder, &d.ping[(n + 1) % 2], &b.blur, bg, load);
         }
-        fullscreen(view, &b.composite, &d.composite_bg);
+        mark(encoder, "bloom blur");
+        // The composite clears its target either way: black with alpha 1, the alpha every
+        // frame pixel keeps (`FRAME_WRITES`).
+        fullscreen(encoder, composite_target, &b.composite, composite_bg, false);
+        mark(encoder, "bloom composite");
         2 + d.blur_bg.len() as u32
     }
+}
+
+/// One bloom pass's inputs: `source`, the params (threshold, tap weight, blur `offset`) and
+/// `frame`, the display-unit view the composite reads.
+fn inputs(
+    device: &wgpu::Device,
+    b: &BloomState,
+    settings: Bloom,
+    source: &wgpu::TextureView,
+    offset: f32,
+    frame: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    use wgpu::util::DeviceExt;
+    let data = [settings.threshold, settings.tap(), offset, 0.0];
+    let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("bloom params"),
+        contents: bytemuck::cast_slice(&data),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    crate::made::bind_group(
+        device,
+        &wgpu::BindGroupDescriptor {
+            label: Some("bloom inputs"),
+            layout: &b.bgl,
+            entries: &[
+                bindings::texture_view(0, source),
+                bindings::sampler(1, &b.sampler),
+                bindings::entire_buffer(2, &params),
+                bindings::texture_view(3, frame),
+            ],
+        },
+    )
 }
 #[cfg(test)]
 mod tests {

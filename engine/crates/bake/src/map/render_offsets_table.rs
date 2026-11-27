@@ -7,11 +7,10 @@ mod data1 {
 mod data2 {
     include!("render_offsets_data2.rs");
 }
-mod data3 {
-    include!("render_offsets_data3.rs");
-}
 // Donor-relative drawing corrections: no source vertices, UVs or triangle indices.
 // Each included list contains only (primitive, vertex, displacement) instructions.
+// Identical fitted move sets are shared across fingerprints: the Xbox, PC1 and PC2
+// Felucia bladder recipes all use data2::MOVES_42.
 pub(super) static RECIPES: &[Recipe] = &[
     // rhn_bldg_broken_front1 (pc1): {'art_surface': 4, 'art_vertex': 5}; 0 removed faces.
     Recipe {
@@ -425,7 +424,7 @@ pub(super) static RECIPES: &[Recipe] = &[
         name: "fel1_bldg_bladder",
         input: "b3f9722b8924125fcf1d822e234bce56fa10a0d947866cfe560c9ffd0c656226",
         shapes: &[(92, 72), (234, 308), (485, 608)],
-        moves: data3::MOVES_43,
+        moves: data2::MOVES_42,
         removals: &[],
     },
 ];
