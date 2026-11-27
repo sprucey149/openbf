@@ -90,6 +90,9 @@ pub struct SideBakeCache {
     pc: Option<crate::tier::PcTextures>,
     own_classes: Vec<manifest::ClassDef>,
     own_combos: Option<manifest::combo::ComboSet>,
+    /// How the LVL and the sides beside it give their combos: a mod's LVL
+    /// is read as the game reads it.
+    read_combos: fn(&[u8]) -> Result<manifest::combo::ComboSet>,
     anim: Option<AnimBakeCache>,
     low_same_sheets: bool,
     sheets: std::sync::OnceLock<std::result::Result<LvlSheets, String>>,
@@ -125,6 +128,11 @@ impl SideBakeCache {
         let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
         let own_classes = anim_sets::bf2::side_classes(&buf)?;
         let mut own_combos = None;
+        let read_combos = if crate::gameplay::is_addon(Path::new(lvl_path)) {
+            crate::combo::baked_mod_combos_from_lvl
+        } else {
+            crate::combo::baked_combos_from_lvl
+        };
 
         let anim = if let Some(anim_path) = anim_lvl {
             let anim_resolved = crate::resolve_ci(anim_path);
@@ -134,7 +142,7 @@ impl SideBakeCache {
             let sanm = mungefs::sanm::find_sanm(ainner).map_err(|e| anyhow!("{e}"))?;
             let bf1 = sanm.is_none();
             if sanm.is_some() {
-                own_combos = crate::combo::baked_combos_from_lvl(&buf).ok();
+                own_combos = read_combos(&buf).ok();
             }
             let sides: Vec<Vec<u8>> = match sanm {
                 Some(_) => ["ALL", "IMP", "REP", "CIS"]
@@ -211,6 +219,7 @@ impl SideBakeCache {
             pc,
             own_classes,
             own_combos,
+            read_combos,
             anim,
             low_same_sheets: false,
             sheets: std::sync::OnceLock::new(),
@@ -404,7 +413,7 @@ impl SideBakeCache {
                 if !bindings.is_empty() {
                     let own = match &self.own_combos {
                         Some(c) => c.clone(),
-                        None => crate::combo::baked_combos_from_lvl(&self.buf)?,
+                        None => (self.read_combos)(&self.buf)?,
                     };
                     let inv = anim_sets::Inventory::new(&banks);
                     let mut model_combos = manifest::combo::ComboSet {
@@ -421,7 +430,7 @@ impl SideBakeCache {
                         .any(|b| !own.combos.iter().any(|c| c.name_hash == b.name_hash))
                     {
                         for side in &anim.sides {
-                            beside.push(crate::combo::baked_combos_from_lvl(side)?);
+                            beside.push((self.read_combos)(side)?);
                         }
                     }
                     for binding in bindings {

@@ -206,17 +206,23 @@ fn edges(db: &ClassDb, weapon: &str) -> Result<Vec<Edge>> {
             result.len()
         );
     }
-    for edge in &result {
-        if !edge.blade.length.is_finite()
-            || edge.blade.length < 0.0
-            || (edge.blade.length == 0.0 && !edge.blade.texture.is_empty())
-            || !edge.blade.width.is_finite()
-            || edge.blade.width <= 0.0
+    // The game stores `LightSaberLength` and `LightSaberWidth` as written
+    // (PS2 BF2: keys 0x643005e0 and 0xc9cbccd8, defaults 1.0 and 0.08, no
+    // range check), and a mod's solid sword zeroes both: its attacks give
+    // their own reach, and there is no blade to see.
+    for edge in &mut result {
+        let blade = &mut edge.blade;
+        if ![blade.length, blade.width]
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0)
         {
             bail!(
-                "{weapon}: edge {} has no positive authored length/width",
-                edge.blade.node
+                "{weapon}: edge {} has a negative or non-finite length/width",
+                blade.node
             );
+        }
+        if blade.length == 0.0 || blade.width == 0.0 {
+            blade.texture.clear();
         }
     }
     Ok(result)

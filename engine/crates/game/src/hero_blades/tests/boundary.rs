@@ -115,7 +115,9 @@ fn untextured_zero_length_melee_edges_keep_their_axis_for_combo_reach() {
     assert_eq!(binding.blade.length, 0.0);
     assert_eq!(binding.local.end - binding.local.start, Vec3::X);
     assert_eq!(bindings[1].tracked_mount, Mat4::IDENTITY);
-    assert!(blade_bindings(&fixture.root, &fixture.db, "visible_paw").is_err());
+    // A texture on a blade with no length draws nothing.
+    let bindings = blade_bindings(&fixture.root, &fixture.db, "visible_paw").unwrap();
+    assert!(bindings.iter().all(|b| b.blade.texture.is_empty()));
 }
 
 #[test]
