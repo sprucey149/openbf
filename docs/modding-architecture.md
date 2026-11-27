@@ -105,6 +105,8 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
    - Optional addon load screens (`bake::loadscreen`), `core.lvl` localization (`bake::hud::bake_locl`), and one addon sound archive per map group (`bake::sounds::bake_addon_sounds`, inheriting stock CORE templates for spatial/bus defaults) are baked into the same cache.
 3. **Addon units (`bake::mods::addon_sides`):**
    - The side LVLs a mission loads from the addon's own folder (`ReadDataFile("dc:SIDE\...")`) supply the soldiers and weapons that mission asks for: each unit's body and every weapon along its class parents are baked with their textures, and their classes become class patches. A name two side files define takes the first in script load order.
+   - Vehicles the missions ask for are baked once per side LVL into `side_bf2/vehicles/0addonNN_<side>/`; the names sort before the stock sides, in the order the scripts read them. A pad's `ClassNeutral` is its class while no team owns it. Vehicle sounds are not converted.
+   - The sides' particle effects and the bolt textures their ordnance names go to `side_bf2/effects/addon/`, which the game reads before the stock effect layers.
    - A script may choose a unit while it runs and load it through a variable, so every soldier of the map's side files that a script of the mod names is baked too.
    - A third team whose classes are only known when its script runs joins the battle after the script's setup (`CampaignRuntime::take_native_requests`), and `SpawnCharacter` fields the class the script selected for that member.
 4. **Stock LVL replacement baking (`bake::mods::replace`, `bake::stock`):**
@@ -170,7 +172,7 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 - **Unsupported legacy mod features (reported honestly in diagnostics):**
   - Arbitrary runtime Lua mission logic outside supported declarative tables and closed world-event actions (e.g., ambient fish/bird flocks, custom Lua timers/triggers, movie previews).
   - Third-party native DLL plugins.
-  - Vehicles, side effects, unit sounds and voice lines, first-person arms and custom animation banks from an addon map's own side LVLs (its soldiers, weapons and their textures are converted).
+  - Vehicle sounds, unit sounds and voice lines, some first-person arms and custom animation banks from an addon map's own side LVLs (its soldiers, weapons, vehicles, particle effects and textures are converted).
   - On a script's third team, `SetClassProperty` applies `MaxHealth` only.
   - Dynamic BF2 `CLTH` cloth simulation (deferred engine-wide under `CLOTH2`; rigid flagpoles/worn cloth render without physics).
   - Menu shell side LVLs (`side/*shell.lvl`), PC 1.1 `GeometryAddon` attachments, 3D starfighter cockpit FPM models, normal/bump maps on non-water surfaces, custom `zaf_`/`zaa_` animation banks, and unsupported skinned MTRL blend modes.

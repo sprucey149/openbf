@@ -339,6 +339,11 @@ impl Library {
         };
         let game = game.to_ascii_lowercase();
         let mut dirs = vec![map_dir.to_path_buf()];
+        // A mod map's own side effects (`bake mod-convert`): the directory
+        // is in that map's layer alone.
+        if game == "bf2" {
+            dirs.push(assets_dir.join("side_bf2/effects/addon"));
+        }
         for f in factions {
             dirs.push(
                 assets_dir

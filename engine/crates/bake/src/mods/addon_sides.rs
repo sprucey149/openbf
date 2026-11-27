@@ -8,7 +8,9 @@
 //!
 //! What a layer holds: every soldier and hand-held weapon model its missions'
 //! classes name that the map's SIDE LVLs carry, their textures, and the
-//! classes (`classes/<file>.patch.ron`). Vehicles, side effects and sounds
+//! classes (`classes/<file>.patch.ron`), and the sides' particle effects and
+//! bolt sheets (`side_bf2/effects/addon/`), and the vehicles of each side
+//! LVL a mission loads a vehicle from (`side_bf2/vehicles/0addon*/`). Sounds
 //! are not converted here.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -207,9 +209,11 @@ pub(super) fn convert_addon_sides(
 
     // Which models each LVL has to give: the requested classes' bodies and
     // weapons, each from the first of the map's sides that carries it.
-    let mut vehicles = BTreeSet::new();
+    // Per map, the positions in its read order of the sides that define a
+    // vehicle one of its missions loads.
+    let mut vehicle_sides: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); levels.len()];
     let mut unknown = BTreeSet::new();
-    for level in levels {
+    for (index, level) in levels.iter().enumerate() {
         let mut wanted: Vec<(PathBuf, String, Model)> = Vec::new();
         {
             let mut classes: HashMap<String, &ClassDef> = HashMap::new();
@@ -254,7 +258,10 @@ pub(super) fn convert_addon_sides(
                     continue;
                 };
                 if !root.base.eq_ignore_ascii_case("soldier") {
-                    vehicles.insert(request.to_ascii_lowercase());
+                    // A class only the stock files have keeps the stock bake.
+                    if let Some(at) = defining_side(level, &lvls, request) {
+                        vehicle_sides[index].insert(at);
+                    }
                     continue;
                 }
                 if let Some(body) = prop(&units, "GeometryName") {
@@ -285,9 +292,6 @@ pub(super) fn convert_addon_sides(
     if !unknown.is_empty() {
         warnings.push(summary("addon classes no LVL defines", &unknown));
     }
-    if !vehicles.is_empty() {
-        warnings.push(summary("addon vehicles are not converted yet", &vehicles));
-    }
 
     // The addon's own `all.lvl` and the like stand beside the other stock
     // sides for the animation bake.
@@ -314,12 +318,135 @@ pub(super) fn convert_addon_sides(
         let _ = std::fs::remove_dir_all(&work);
     }
 
-    for level in levels {
+    // Each side LVL's vehicles once, however many maps load from it.
+    let mut vehicle_layers: BTreeMap<&PathBuf, PathBuf> = BTreeMap::new();
+    for (level, wanted) in levels.iter().zip(&vehicle_sides) {
+        for &at in wanted {
+            let (stem, path) = &level.sides[at];
+            let next = vehicle_layers.len();
+            vehicle_layers.entry(path).or_insert_with(|| {
+                let out = scratch.join(format!("veh{next}"));
+                progress(&format!("Converting the addon's {stem}.lvl vehicles..."));
+                let source = path.to_string_lossy();
+                if let Err(e) =
+                    crate::vehicle::bake_vehicles(&source, &out.to_string_lossy(), Some(&source))
+                {
+                    warnings.push(format!(
+                        "The addon's {stem}.lvl vehicles could not be converted ({e:#})."
+                    ));
+                    let _ = std::fs::remove_dir_all(&out);
+                }
+                out
+            });
+        }
+    }
+
+    // Maps that read the same sides share one effects layer.
+    let mut effect_layers: BTreeMap<Vec<&PathBuf>, PathBuf> = BTreeMap::new();
+    for (level, wanted) in levels.iter().zip(&vehicle_sides) {
         write_level(level, env, stock, &stock_files, &lvls, staging)
             .with_context(|| format!("writing the addon units of {}", level.map_key))?;
+        let order: Vec<&PathBuf> = level.sides.iter().map(|(_, p)| p).collect();
+        let next = effect_layers.len();
+        let layer = effect_layers.entry(order).or_insert_with_key(|order| {
+            let out = scratch.join(format!("fx{next}"));
+            progress(&format!(
+                "Converting the addon's effects for {}...",
+                level.map_key
+            ));
+            if let Err(e) = bake_effects(order, &lvls, &out) {
+                warnings.push(format!(
+                    "The addon's side effects for `{}` could not be converted ({e:#}).",
+                    level.map_key
+                ));
+            }
+            out
+        });
+        let to = staging.join("levels").join(&level.map_key).join("assets");
+        link_files(layer, &to.join(EFFECTS_DIR))?;
+        for &at in wanted {
+            let (stem, path) = &level.sides[at];
+            if let Some(layer) = vehicle_layers.get(path) {
+                link_files(layer, &to.join(vehicle_dir(at, stem)))?;
+            }
+        }
     }
     let _ = std::fs::remove_dir_all(&scratch);
     Ok(warnings)
+}
+
+/// The position in `level`'s read order of the first side that defines `class`.
+fn defining_side(
+    level: &LevelSides,
+    lvls: &BTreeMap<PathBuf, SideLvl>,
+    class: &str,
+) -> Option<usize> {
+    level.sides.iter().position(|(_, p)| {
+        lvls.get(p)
+            .is_some_and(|l| l.classes.iter().any(|c| c.name.eq_ignore_ascii_case(class)))
+    })
+}
+
+/// The level layer's directory for the vehicles of the side read `at`th. The
+/// game takes a vehicle from the first of `side_bf2/vehicles/*` that has it,
+/// in path order: these sort before the stock sides, in the map's read order.
+fn vehicle_dir(at: usize, stem: &str) -> String {
+    format!(
+        "side_{GAME_KEY}/vehicles/0addon{at:02}_{}",
+        stem.to_ascii_lowercase()
+    )
+}
+
+/// The level layer's directory for the addon's own side effects and bolt
+/// sheets, which the game reads before the stock effect layers.
+const EFFECTS_DIR: &str = "side_bf2/effects/addon";
+
+/// The particle effects of a map's SIDE LVLs, and the sheets their ordnance
+/// classes draw bolts with.
+fn bake_effects(order: &[&PathBuf], lvls: &BTreeMap<PathBuf, SideLvl>, out: &Path) -> Result<()> {
+    let laser = mungefs::fnv1a_lowercase("LaserTexture");
+    let sheets: BTreeSet<String> = order
+        .iter()
+        .filter_map(|p| lvls.get(*p))
+        .flat_map(|l| &l.classes)
+        .flat_map(|c| &c.props)
+        .filter(|(k, _)| *k == laser)
+        .map(|(_, v)| v.trim().trim_matches('"').to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+        .collect();
+    let bufs = order
+        .iter()
+        .filter(|p| lvls.contains_key(**p))
+        .map(|p| crate::gameplay::read(p))
+        .collect::<Result<Vec<_>>>()?;
+    let slices: Vec<&[u8]> = bufs.iter().map(|b| &b[..]).collect();
+    let sheets: Vec<String> = sheets.into_iter().collect();
+    crate::effects::bake_layers(
+        &slices,
+        "the addon's sides",
+        &out.to_string_lossy(),
+        GAME_KEY,
+        &sheets,
+    )?;
+    Ok(())
+}
+
+/// Every file below `from`, hard-linked (else copied) below `to`.
+fn link_files(from: &Path, to: &Path) -> Result<()> {
+    for rel in files_below(from) {
+        let target = to.join(&rel);
+        if target.exists() {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let source = from.join(&rel);
+        if std::fs::hard_link(&source, &target).is_err() {
+            std::fs::copy(&source, &target)?;
+        }
+    }
+    Ok(())
 }
 
 fn summary(what: &str, names: &BTreeSet<String>) -> String {
@@ -557,6 +684,40 @@ mod tests {
                 .map(|(k, v)| (mungefs::fnv1a_lowercase(k), (*v).to_owned()))
                 .collect(),
         }
+    }
+
+    #[test]
+    fn a_vehicle_comes_from_the_first_side_read_that_defines_it() {
+        let side = |classes: &[&str]| SideLvl {
+            stem: String::new(),
+            classes: classes.iter().map(|n| def(n, "hover", &[])).collect(),
+            facts: LvlFacts::default(),
+            models: BTreeSet::new(),
+            wanted: BTreeMap::new(),
+            out: PathBuf::new(),
+            baked: BTreeMap::new(),
+        };
+        let lvls = BTreeMap::from([
+            (PathBuf::from("a.lvl"), side(&["x_tank"])),
+            (PathBuf::from("b.lvl"), side(&["x_tank", "x_walker"])),
+        ]);
+        let level = LevelSides {
+            map_key: "m".into(),
+            sides: vec![("A".into(), "a.lvl".into()), ("B".into(), "b.lvl".into())],
+            requests: BTreeSet::new(),
+        };
+        assert_eq!(defining_side(&level, &lvls, "X_TANK"), Some(0));
+        assert_eq!(defining_side(&level, &lvls, "x_walker"), Some(1));
+        assert_eq!(defining_side(&level, &lvls, "x_none"), None);
+        // The game reads `vehicles/*` in path order: read order, then stock.
+        let mut dirs = [
+            "side_bf2/vehicles/all".to_owned(),
+            vehicle_dir(1, "B"),
+            vehicle_dir(0, "Z"),
+        ];
+        dirs.sort();
+        assert_eq!(dirs[0], "side_bf2/vehicles/0addon00_z");
+        assert_eq!(dirs[1], "side_bf2/vehicles/0addon01_b");
     }
 
     #[test]

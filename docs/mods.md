@@ -82,7 +82,8 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 - Conventional PC `_LVL_PC` addon maps referencing stock BF2 sides, classes, weapons, vehicles, and planet sound banks.
 - Standard `addme.script` + `mission.lvl` mission scripts (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`), including multi-variant single-player world selection with fixed multiplayer branches.
 - PC `tern` terrain (with PC directional lighting), PC DXT1/DXT3/DXT5/A8R8G8B8 textures, PC `V8U8` normal-mapped water, PC bump and glossmap specular materials (`MTRL` 0x20 / 0x08, specular cube from a PC BF2 `core.lvl`), static collision meshes, world instances/regions/layers, `plan`/`plnp` nav graphs, `core.lvl` localized text tables, addon load screens, and addon sound banks with stock CORE template inheritance.
-- Soldiers and weapons from an addon map's own side LVLs, with their classes and textures, including a hero a mission script picks while it runs for a third team.
+- Soldiers, weapons, vehicles, particle effects and bolt textures from an addon map's own side LVLs, with their classes and textures, including a hero a mission script picks while it runs for a third team.
+- A script that draws its troops at random during setup (for example uniforms of another period): each draw is its own roster, picked per round with the script's odds. A LAN round takes the script's multiplayer branch.
 - Generic stock LVL replacements for playable `side/*.lvl` files (class patches, soldiers, weapons, vehicles, side effects, textures), `fpm/...` first-person arm LVLs, stock world LVLs (both texture-only fast path and full world re-bake), and `load/<map>.lvl` load screens.
 
 ### Not Supported / Skipped with Diagnostics
@@ -91,6 +92,6 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 - Custom eras and custom game modes. A new map's missions in a mode openbf does not know are reported as unsupported.
 - Arbitrary runtime Lua mission logic outside supported declarative tables and closed world-event actions.
 - Custom third-party native DLL plugins.
-- Vehicles, side effects, unit sounds and voice lines, first-person arms and custom animation banks from an addon map's own side LVLs.
+- Vehicle sounds, unit sounds and voice lines, some first-person arms and custom animation banks from an addon map's own side LVLs.
 - Dynamic BF2 `CLTH` cloth simulation (deferred engine-wide under `CLOTH2`; rigid flagpoles and worn cloth render without cloth physics).
 - Menu shell side LVLs (`side/*shell.lvl`), PC 1.1 `GeometryAddon` attachments, 3D starfighter cockpit FPM models, normal maps on materials without the PC bump flag, custom `zaf_`/`zaa_` animation banks, and unsupported skinned MTRL blend modes.
