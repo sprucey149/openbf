@@ -12,7 +12,7 @@
 use super::state::Sim;
 use crate::fmath::FloatExt;
 use crate::projectile::Target;
-use crate::soldier::Stance;
+use crate::soldier::{GroundRules, Stance};
 use crate::unit::UnitHandle;
 use crate::vehicle::{VehicleHandle, VehicleKind};
 use crate::weapon::{blast_falloff, ExplosionClass};
@@ -308,7 +308,8 @@ impl Sim {
     ///   0.6, 0) and Push x [`crate::soldier::KNOCK_PUSH_SCALE`] x
     ///   [`knock_falloff`], under [`crate::soldier::KNOCK_RULES`] on every
     ///   map. Deviations (the maintainer, 2026-10-27): the living are pushed on BF2
-    ///   maps too (BF2's `PushDeadOnly` is not read), and the push fades with
+    ///   maps too (BF2's `PushDeadOnly` is not read; but see
+    ///   [`can_knock_down`]), and the push fades with
     ///   the distance (the disc authors PushRadiusInner = Outer, all or
     ///   nothing). A droid class rolls its `ChunkFrequency` first
     ///   ([`Sim::chunk_push_roll`], card DROIDDEATH): won, it is marked and
@@ -341,6 +342,9 @@ impl Sim {
         if e.push <= 0.0 || mounted || (e.spares_living && self.units[i].alive) {
             return;
         }
+        if self.ground_rules == GroundRules::Bf2 && self.units[i].alive && !can_knock_down(e.push) {
+            return;
+        }
         if self.units[i].soldier.stance.knocked() || self.chunk_push_roll(i) {
             return;
         }
@@ -363,6 +367,21 @@ impl Sim {
         // Issue #173 [ours]: a fall after the throw is the thrower's kill.
         self.note_forced_move(h, attacker);
     }
+}
+
+/// Can a blast of `push` knock down a soldier at rest at all: under
+/// [`crate::soldier::KNOCK_RULES`] its strongest impulse (straight up, at the
+/// blast) is `push` x [`crate::soldier::KNOCK_PUSH_SCALE`] x (1 +
+/// [`crate::soldier::KNOCK_LIFT`]), which must pass
+/// [`crate::soldier::KNOCK_THROW_VY`]. Ours: the port's push of the living on
+/// BF2 data stops at the weaker classes, and they keep BF2's own outcome
+/// (`PushDeadOnly` on by default: only the dead are pushed, re-knockback §4).
+/// BF1's apply tests the whole velocity, so any push at all would otherwise
+/// tumble a soldier who is only running: BF2 authors such classes (0.5 on
+/// vehicle cannons), and an addon may set one off at every bolt's impact.
+pub fn can_knock_down(push: f32) -> bool {
+    push * crate::soldier::KNOCK_PUSH_SCALE * (1.0 + crate::soldier::KNOCK_LIFT)
+        > crate::soldier::KNOCK_THROW_VY
 }
 
 /// The push's share at `d` from the blast for a body of width `w`: 1 at the
@@ -1073,5 +1092,32 @@ mod tests {
             vel(&s, p)
         );
         assert_eq!(s.units[p.index as usize].soldier.stance, Stance::Thrown);
+    }
+
+    /// A push too weak to knock down a soldier at rest leaves a running one
+    /// alone on BF2 data (the PS2 pushes only the dead there); on BF1 data
+    /// its apply reads the whole velocity, and the runner tumbles.
+    #[test]
+    fn knock_a_weak_push_leaves_a_bf2_runner_alone() {
+        assert!(!can_knock_down(0.5));
+        assert!(can_knock_down(10.0));
+        let weak = ExplosionClass {
+            damage: 1.0,
+            damage_outer: 2.0,
+            push: 0.1,
+            push_outer: 2.0,
+            ..Default::default()
+        };
+        for (rules, knocked) in [
+            (crate::soldier::GroundRules::Bf2, false),
+            (crate::soldier::GroundRules::Bf1, true),
+        ] {
+            let mut s = sim_for(rules);
+            let p = s.spawn(&UnitSpec::trooper(1, Vec3::ZERO)).unwrap();
+            s.units[p.index as usize].soldier.vel = Vec3::new(6.0, 0.0, 0.0);
+            s.explode(&weak, Vec3::new(1.0, 0.0, 0.0), None, Some(0));
+            let stance = s.units[p.index as usize].soldier.stance;
+            assert_eq!(stance.knocked(), knocked, "{rules:?}: {stance:?}");
+        }
     }
 }
