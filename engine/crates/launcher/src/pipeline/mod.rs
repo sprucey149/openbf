@@ -72,7 +72,7 @@ pub(crate) fn hide_console(cmd: &mut Command) -> &mut Command {
 }
 
 /// True when `program args` runs and exits successfully, with all output discarded.
-fn tool_responds(program: &str, args: &[&str]) -> bool {
+fn tool_responds(program: impl AsRef<OsStr>, args: &[&str]) -> bool {
     let mut cmd = Command::new(program);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -96,11 +96,31 @@ fn find_python() -> Result<(PathBuf, &'static [&'static str])> {
         .context("Python 3.10+ not found on PATH (required for mission generation during setup)")
 }
 
-fn check_ffmpeg() -> Result<()> {
+fn find_ffmpeg(paths: &LauncherPaths) -> Result<PathBuf> {
+    if let Some(bundled) = paths.ffmpeg_bin() {
+        if tool_responds(&bundled, &["-version"]) {
+            return Ok(bundled);
+        }
+        bail!(
+            "configured/bundled ffmpeg at {} did not respond to -version",
+            bundled.display()
+        );
+    }
+    if let Some(extracted) = paths.ensure_embedded_ffmpeg()? {
+        if tool_responds(&extracted, &["-version"]) {
+            return Ok(extracted);
+        }
+        bail!(
+            "embedded ffmpeg extracted to {} did not respond to -version",
+            extracted.display()
+        );
+    }
     if tool_responds("ffmpeg", &["-version"]) {
-        Ok(())
+        Ok(PathBuf::from("ffmpeg"))
     } else {
-        bail!("ffmpeg not found on PATH (required for audio/video conversion during setup)")
+        bail!(
+            "ffmpeg not found (place ffmpeg{EXE_SUFFIX} in openbf_data/tools/ or beside the launcher, set OPENBF_FFMPEG, or install it on PATH)"
+        )
     }
 }
 
@@ -108,6 +128,7 @@ fn check_ffmpeg() -> Result<()> {
 pub struct ExecCtx {
     pub bake_bin: PathBuf,
     pub launcher_exe: PathBuf,
+    pub ffmpeg_bin: PathBuf,
     pub python_bin: PathBuf,
     pub python_extra: &'static [&'static str],
     pub cancel: Arc<AtomicBool>,
@@ -131,11 +152,13 @@ impl ExecCtx {
         self.sink.on_line(line);
     }
 
-    /// Run `bake <args>`, pointing its audio restoration at this launcher.
+    /// Run `bake <args>`, pointing its audio restoration at this launcher
+    /// and forwarding the resolved `ffmpeg` binary.
     pub fn run_bake(&self, args: &[impl AsRef<OsStr>], env: &EnvOverrides<'_>) -> Result<()> {
         let mut cmd = Command::new(&self.bake_bin);
         cmd.args(args)
             .env("OPENBF_AUDIO_RESTORE_BIN", &self.launcher_exe)
+            .env("OPENBF_FFMPEG", &self.ffmpeg_bin)
             .env_remove("OPENBF_AUDIO_RESTORE_SCRIPT");
         apply_env(&mut cmd, env);
         let desc = format!(
@@ -278,12 +301,13 @@ pub fn run_setup(
     })?;
     let launcher_exe = std::env::current_exe().context("locating launcher executable")?;
 
-    check_ffmpeg()?;
+    let ffmpeg_bin = find_ffmpeg(paths)?;
     let (python_bin, python_extra) = find_python()?;
 
     let ctx = ExecCtx {
         bake_bin,
         launcher_exe,
+        ffmpeg_bin,
         python_bin,
         python_extra,
         cancel,

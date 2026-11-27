@@ -1197,6 +1197,15 @@ fn run_bake_convert(
     if let Some(stock) = &env.stock {
         cmd.arg("--stock-assets").arg(stock);
     }
+    if std::env::var_os("OPENBF_FFMPEG").is_none() {
+        let bundled = env
+            .data_dir
+            .join("tools")
+            .join(format!("ffmpeg{}", crate::paths::EXE_SUFFIX));
+        if bundled.is_file() {
+            cmd.env("OPENBF_FFMPEG", bundled);
+        }
+    }
     cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(target_os = "windows")]

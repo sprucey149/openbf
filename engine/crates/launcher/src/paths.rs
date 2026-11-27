@@ -8,6 +8,8 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
+include!(concat!(env!("OUT_DIR"), "/embedded_ffmpeg.rs"));
+
 /// The archive entry only a build with Battlefront I carries.
 const BF1_MARKER: &str = "assets_baked/common_bf1/common.ron";
 
@@ -101,6 +103,58 @@ impl LauncherPaths {
             .into_iter()
             .chain(self.checkout_targets(&name)),
         )
+    }
+
+    /// If this launcher was built with `OPENBF_EMBED_FFMPEG`, materialize the
+    /// embedded `ffmpeg` binary into `openbf_data/tools/ffmpeg(.exe)` when absent
+    /// (or different size) so the user never has to install `ffmpeg`.
+    pub fn ensure_embedded_ffmpeg(&self) -> Result<Option<PathBuf>> {
+        let Some(bytes) = EMBEDDED_FFMPEG else {
+            return Ok(None);
+        };
+        let tools_dir = self.data_dir.join("tools");
+        let target = tools_dir.join(format!("ffmpeg{EXE_SUFFIX}"));
+        let up_to_date = std::fs::metadata(&target)
+            .ok()
+            .is_some_and(|m| m.is_file() && m.len() == bytes.len() as u64);
+        if !up_to_date {
+            std::fs::create_dir_all(&tools_dir)
+                .with_context(|| format!("creating {}", tools_dir.display()))?;
+            let tmp = tools_dir.join(format!("ffmpeg.tmp.{}{EXE_SUFFIX}", std::process::id()));
+            std::fs::write(&tmp, bytes)
+                .with_context(|| format!("extracting embedded ffmpeg to {}", tmp.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+            }
+            if target.exists() {
+                let _ = std::fs::remove_file(&target);
+            }
+            std::fs::rename(&tmp, &target).with_context(|| {
+                format!("installing embedded ffmpeg at {}", target.display())
+            })?;
+        }
+        Ok(Some(target))
+    }
+
+    /// Locate a bundled or explicitly configured `ffmpeg` executable:
+    /// `OPENBF_FFMPEG`, `openbf_data/tools/ffmpeg(.exe)`, beside the launcher,
+    /// `<exe_dir>/tools/ffmpeg(.exe)`, or `<exe_dir>/openbf_data/tools/ffmpeg(.exe)`.
+    /// Returns `None` when none of those exist (callers may then fall back to `PATH`).
+    pub fn ffmpeg_bin(&self) -> Option<PathBuf> {
+        if let Some(ov) = std::env::var_os("OPENBF_FFMPEG").filter(|s| !s.is_empty()) {
+            return Some(PathBuf::from(ov));
+        }
+        let name = format!("ffmpeg{EXE_SUFFIX}");
+        [
+            self.data_dir.join("tools").join(&name),
+            self.exe_dir.join(&name),
+            self.exe_dir.join("tools").join(&name),
+            self.exe_dir.join("openbf_data").join("tools").join(&name),
+        ]
+        .into_iter()
+        .find(|p| p.is_file())
     }
 
     /// The stock bake a mod scan resolves replacements against and a
@@ -366,6 +420,30 @@ mod tests {
             paths.startup_error_path(),
             custom.join("last_startup_error.ron")
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ffmpeg_bin_prefers_data_tools_then_sibling() {
+        let dir = scratch("ffmpeg_bin");
+        let exe = dir.join(format!("openbf-launcher{EXE_SUFFIX}"));
+        let paths = LauncherPaths::from_exe(&exe, None);
+        let name = format!("ffmpeg{EXE_SUFFIX}");
+
+        // Without OPENBF_FFMPEG or bundled files, returns None (callers fall back to PATH).
+        if std::env::var_os("OPENBF_FFMPEG").is_none() {
+            assert_eq!(paths.ffmpeg_bin(), None);
+
+            let sibling = dir.join(&name);
+            std::fs::write(&sibling, b"stub").unwrap();
+            assert_eq!(paths.ffmpeg_bin(), Some(sibling));
+
+            let in_tools = paths.data_dir.join("tools").join(&name);
+            std::fs::create_dir_all(in_tools.parent().unwrap()).unwrap();
+            std::fs::write(&in_tools, b"stub").unwrap();
+            assert_eq!(paths.ffmpeg_bin(), Some(in_tools));
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

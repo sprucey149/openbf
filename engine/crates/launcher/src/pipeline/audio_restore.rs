@@ -391,7 +391,12 @@ pub fn process_pcm(pcm: &[u8], rate: u32, kind: &str, ffmpeg: &str) -> Result<Ve
 /// Run the stdin/stdout binary worker loop for `bake`.
 pub fn run_worker(kind: &str) -> Result<()> {
     let _ = profile_for(kind)?;
-    let ffmpeg = std::env::var("OPENBF_FFMPEG").unwrap_or_else(|_| "ffmpeg".to_string());
+    let paths = crate::paths::LauncherPaths::discover();
+    let ffmpeg = paths
+        .ffmpeg_bin()
+        .or_else(|| paths.ensure_embedded_ffmpeg().ok().flatten())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "ffmpeg".to_string());
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = BufReader::new(stdin.lock());
