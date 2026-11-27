@@ -451,8 +451,16 @@ impl LightPath {
 pub fn light_path(m: &Model, seg: &mungefs::model::Segment) -> LightPath {
     let f = seg.material_flags;
     let vertex_bit = if seg.bf2_material { 0x200 } else { 0x40 };
-    if seg.pc_geometry && f & vertex_bit != 0 && seg.colors.is_some() {
-        return LightPath::VertexLit;
+    if seg.pc_geometry {
+        // PC meshes do not use PS2's model-wide VU1 prelit dispatch; a lit
+        // segment without vertex colors on a mixed model stays normally Lit.
+        return if f & vertex_bit != 0 && seg.colors.is_some() {
+            LightPath::VertexLit
+        } else if f & 0x01 == 0 {
+            LightPath::Unlit
+        } else {
+            LightPath::Lit
+        };
     }
     let (vc_lit, prelit) = if seg.bf2_material {
         let model_prelit = m
@@ -1060,6 +1068,32 @@ mod tests {
         let plain = model_to_glb(&m, &alphas, false).unwrap();
         let json = String::from_utf8_lossy(&plain[20..]).into_owned();
         assert!(!json.contains("COLOR_0") && !json.contains("\"light\""));
+    }
+
+    #[test]
+    fn pc_mixed_vertex_color_segment_stays_lit() {
+        let mut s0 = bf2(0x201, true);
+        s0.pc_geometry = true;
+        let mut s1 = bf2(0x01, false);
+        s1.pc_geometry = true;
+        let m = model(vec![s0, s1]);
+        let alphas: Vec<SegmentAlpha> = m
+            .segments
+            .iter()
+            .map(|s| SegmentAlpha {
+                texture: "t".into(),
+                mode: AlphaMode::Opaque,
+                rule: Rule::Mask,
+                flags: s.material_flags,
+                rtyp: RenderType::Bf1("Normal".into()),
+                stats: None,
+            })
+            .collect();
+        let bytes = model_to_glb(&m, &alphas, true).unwrap();
+        let json = String::from_utf8_lossy(&bytes[20..]).into_owned();
+        assert!(json.contains("\"light\":\"vertex_lit\""), "{json}");
+        assert!(json.contains("\"light\":\"lit\""), "{json}");
+        assert!(!json.contains("\"light\":\"prelit\""), "{json}");
     }
 
     #[test]
