@@ -274,22 +274,22 @@ impl LauncherApp {
         v.window_fill = BG_MAIN;
         v.override_text_color = Some(TEXT_PRIMARY);
         v.widgets.noninteractive.bg_fill = BG_MAIN;
-        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, INPUT_BORDER);
+        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, INPUT_BORDER);
         v.widgets.noninteractive.corner_radius = CornerRadius::ZERO;
         v.widgets.inactive.bg_fill = BTN_BG;
         v.widgets.inactive.weak_bg_fill = BTN_BG;
-        v.widgets.inactive.bg_stroke = Stroke::new(1.0, BTN_BORDER);
+        v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, BTN_BORDER);
         v.widgets.inactive.corner_radius = CornerRadius::ZERO;
         v.widgets.hovered.bg_fill = BTN_HOVER;
         v.widgets.hovered.weak_bg_fill = BTN_HOVER;
-        v.widgets.hovered.bg_stroke = Stroke::new(1.0, BTN_BORDER);
+        v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, BTN_BORDER);
         v.widgets.hovered.corner_radius = CornerRadius::ZERO;
         v.widgets.active.bg_fill = NAV_ACTIVE;
         v.widgets.active.weak_bg_fill = NAV_ACTIVE;
-        v.widgets.active.bg_stroke = Stroke::new(1.0, NAV_BAR);
+        v.widgets.active.bg_stroke = Stroke::new(1.0_f32, NAV_BAR);
         v.widgets.active.corner_radius = CornerRadius::ZERO;
         v.selection.bg_fill = MENU_HOVER;
-        v.selection.stroke = Stroke::new(1.0, NAV_BAR);
+        v.selection.stroke = Stroke::new(1.0_f32, NAV_BAR);
         v.popup_shadow = POPUP_SHADOW;
         style.visuals = v;
         style.spacing.item_spacing = Vec2::new(8.0, 0.0);
@@ -337,7 +337,7 @@ impl LauncherApp {
                         Pos2::new(rect.right(), rect.top() - 22.0),
                         Pos2::new(rect.right(), rect.bottom() + 17.0),
                     ],
-                    Stroke::new(1.0, BORDER_SIDEBAR),
+                    Stroke::new(1.0_f32, BORDER_SIDEBAR),
                 );
 
                 // `openbf` bold wordmark (margin: 0 23px 25px, 16px bold).
@@ -650,7 +650,7 @@ impl LauncherApp {
         let width = ui.available_width();
         Frame::new()
             .fill(Color32::from_rgb(0xfd, 0xf3, 0xf2))
-            .stroke(Stroke::new(1.0, DOT_MISSING))
+            .stroke(Stroke::new(1.0_f32, DOT_MISSING))
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.set_width((width - 24.0).max(160.0));
@@ -983,7 +983,7 @@ fn dropdown_picker(
         rect,
         CornerRadius::ZERO,
         bg,
-        Stroke::new(1.0, INPUT_BORDER),
+        Stroke::new(1.0_f32, INPUT_BORDER),
         StrokeKind::Inside,
     );
     let fg = if enabled { TEXT_PRIMARY } else { TEXT_MUTED };
@@ -1000,7 +1000,7 @@ fn dropdown_picker(
     // Crisp downward chevron matching the mockup's SVG.
     let cx = rect.right() - 12.0;
     let cy = rect.center().y;
-    let chevron = Stroke::new(1.3, Color32::from_rgb(0x55, 0x55, 0x55));
+    let chevron = Stroke::new(1.3_f32, Color32::from_rgb(0x55, 0x55, 0x55));
     ui.painter().line_segment(
         [Pos2::new(cx - 3.5, cy - 1.5), Pos2::new(cx, cy + 2.0)],
         chevron,
@@ -1027,7 +1027,7 @@ fn dropdown_picker(
             .show(ui.ctx(), |ui| {
                 Frame::new()
                     .fill(BG_MAIN)
-                    .stroke(Stroke::new(1.0, MENU_BORDER))
+                    .stroke(Stroke::new(1.0_f32, MENU_BORDER))
                     .inner_margin(Margin::symmetric(0, 2))
                     .shadow(POPUP_SHADOW)
                     .show(ui, |ui| {
@@ -1109,7 +1109,7 @@ fn readonly_path_box(ui: &mut egui::Ui, text: &str, selected: bool, width: f32) 
         rect,
         CornerRadius::ZERO,
         BG_MAIN,
-        Stroke::new(1.0, INPUT_BORDER),
+        Stroke::new(1.0_f32, INPUT_BORDER),
         StrokeKind::Inside,
     );
     let color = if selected {
@@ -1141,7 +1141,7 @@ pub(crate) fn flat_button(ui: &mut egui::Ui, label: &str, size: Vec2, enabled: b
         rect,
         CornerRadius::ZERO,
         bg,
-        Stroke::new(1.0, BTN_BORDER),
+        Stroke::new(1.0_f32, BTN_BORDER),
         StrokeKind::Inside,
     );
     ui.painter().text(
@@ -1207,7 +1207,7 @@ fn chrome_button(ui: &mut egui::Ui, icon: ChromeIcon) -> bool {
         ui.painter().rect_filled(rect, CornerRadius::ZERO, bg);
     }
     let c = rect.center();
-    let stroke = Stroke::new(1.35, fg);
+    let stroke = Stroke::new(1.35_f32, fg);
     match icon {
         ChromeIcon::Minimize => {
             ui.painter().line_segment(
@@ -1487,7 +1487,7 @@ pub(crate) fn draw_notice_box(
     let width = ui.available_width();
     Frame::new()
         .fill(fill)
-        .stroke(Stroke::new(1.0, border))
+        .stroke(Stroke::new(1.0_f32, border))
         .inner_margin(Margin::symmetric(10, 7))
         .show(ui, |ui| {
             // 10px left + 10px right inner margin + 1px left + 1px right stroke = 22px.
@@ -1511,7 +1511,7 @@ pub(crate) fn extension_badge(ui: &mut egui::Ui, text: &str, small: bool) {
     };
     Frame::new()
         .fill(BG_SIDEBAR)
-        .stroke(Stroke::new(1.0, BORDER_SIDEBAR))
+        .stroke(Stroke::new(1.0_f32, BORDER_SIDEBAR))
         .inner_margin(Margin::symmetric(pad_x, pad_y))
         .show(ui, |ui| {
             ui.add(
@@ -1609,7 +1609,7 @@ pub(crate) fn extension_toggle(
         rect,
         CornerRadius::ZERO,
         track_fill,
-        Stroke::new(1.0, track_border),
+        Stroke::new(1.0_f32, track_border),
         StrokeKind::Inside,
     );
     let knob_x = if enabled {

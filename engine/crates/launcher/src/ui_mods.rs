@@ -459,7 +459,7 @@ impl LauncherApp {
 
         Frame::new()
             .fill(BG_MAIN)
-            .stroke(Stroke::new(1.0, border_color))
+            .stroke(Stroke::new(1.0_f32, border_color))
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.set_width(card_w);
@@ -810,7 +810,7 @@ impl LauncherApp {
         Frame::new()
             .fill(BG_MAIN)
             .stroke(Stroke::new(
-                1.0,
+                1.0_f32,
                 if enabled { DOT_READY } else { INPUT_BORDER },
             ))
             .inner_margin(Margin::symmetric(12, 10))
@@ -1081,7 +1081,7 @@ fn draw_expand_chevron(ui: &mut egui::Ui, expanded: bool) {
     let (chev_rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 16.0), Sense::hover());
     let cx = chev_rect.center().x;
     let cy = chev_rect.center().y;
-    let chev_stroke = Stroke::new(1.3, Color32::from_rgb(0x55, 0x55, 0x55));
+    let chev_stroke = Stroke::new(1.3_f32, Color32::from_rgb(0x55, 0x55, 0x55));
     if expanded {
         ui.painter().line_segment(
             [Pos2::new(cx - 3.5, cy - 1.5), Pos2::new(cx, cy + 2.0)],
@@ -1197,7 +1197,7 @@ fn order_arrow_button(ui: &mut egui::Ui, up: bool, enabled: bool) -> bool {
     let c = rect.center();
     let tip_y = if up { c.y - 2.5 } else { c.y + 2.5 };
     let base_y = if up { c.y + 2.0 } else { c.y - 2.0 };
-    let stroke = Stroke::new(1.6, color);
+    let stroke = Stroke::new(1.6_f32, color);
     ui.painter().line_segment(
         [Pos2::new(c.x - 4.0, base_y), Pos2::new(c.x, tip_y)],
         stroke,

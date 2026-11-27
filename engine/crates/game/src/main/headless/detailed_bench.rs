@@ -54,11 +54,11 @@ impl InstrCounter {
 
     fn read(&self) -> Option<u64> {
         unsafe extern "C" {
-            fn read(fd: std::ffi::c_int, buf: *mut u64, count: usize) -> isize;
+            fn read(fd: std::ffi::c_int, buf: *mut std::ffi::c_void, count: usize) -> isize;
         }
         let mut value = 0u64;
         // SAFETY: a counter fd with no read_format writes one u64.
-        (unsafe { read(self.0?, &mut value, 8) } == 8).then_some(value)
+        (unsafe { read(self.0?, (&mut value as *mut u64).cast(), 8) } == 8).then_some(value)
     }
 }
 
