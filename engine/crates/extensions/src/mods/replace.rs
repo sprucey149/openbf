@@ -700,6 +700,14 @@ fn resolve_one(
 
     match chosen {
         Some(t) => finish(op, &src.facts, t, catalogs),
+        None if src.facts.stub
+            && cands
+                .iter()
+                .all(|(c, l)| c.path_depth < max_depth || !l.facts.stub) =>
+        {
+            op.status = OpStatus::Unsupported(BLANKS_STOCK.into());
+            op
+        }
         None => {
             op.status = OpStatus::Ambiguous;
             op.evidence.push(format!(
@@ -710,6 +718,12 @@ fn resolve_one(
         }
     }
 }
+
+/// Why an empty LVL over a stocked one produces nothing, whichever of its
+/// targets it has: a file that matches several is refused here too, so the
+/// player is never asked for a choice that cannot change the output.
+const BLANKS_STOCK: &str =
+    "an empty LVL blanks the stock file; removing a whole stock LVL is not supported";
 
 fn finish(
     mut op: ResourceOp,
@@ -742,10 +756,7 @@ fn finish(
     op.changes = changes;
     op.gameplay = gameplay;
     op.status = if facts.stub && !stock.facts.stub {
-        OpStatus::Unsupported(
-            "an empty LVL blanks the stock file; removing a whole stock LVL is not supported"
-                .into(),
-        )
+        OpStatus::Unsupported(BLANKS_STOCK.into())
     } else {
         OpStatus::Active
     };
@@ -1026,6 +1037,16 @@ mod tests {
         let ops = resolve(vec![("allxwing.lvl", f)], &choice);
         assert_eq!(ops[0].status, OpStatus::Active);
         assert!(ops[0].selected_by_user);
+    }
+
+    #[test]
+    fn an_empty_file_over_several_stocked_targets_asks_for_no_choice() {
+        let mut f = facts("m-stub", SourceGame::Bf2, Vec::new());
+        f.stub = true;
+        let ops = resolve(vec![("allxwing.lvl", f)], &BTreeMap::new());
+        assert!(matches!(&ops[0].status, OpStatus::Unsupported(r) if r == BLANKS_STOCK));
+        assert!(!ops[0].status.needs_user());
+        assert_eq!(ops[0].candidates.len(), 2);
     }
 
     #[test]

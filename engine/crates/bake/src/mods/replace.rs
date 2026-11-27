@@ -301,6 +301,12 @@ enum ModelKind {
     Vehicle,
 }
 
+/// A model baked off the job thread, with what it asks of the sheets.
+enum Baked {
+    Soldier((crate::soldier::BakedSoldier, Vec<crate::soldier::Request>)),
+    Weapon((crate::soldier::BakedWeapon, crate::soldier::Request)),
+}
+
 impl Job<'_> {
     fn sub_progress(&mut self, done: usize, total: usize, detail: &str) {
         let (lo, hi) = self.pct_range;
@@ -543,61 +549,94 @@ impl Job<'_> {
         let mut flags: HashMap<String, u32> = HashMap::new();
         let mut produced_textures: BTreeSet<String> = BTreeSet::new();
 
-        for (mi, (m, kind)) in wanted.iter().enumerate() {
-            match kind {
-                ModelKind::Soldier => {
-                    self.sub_progress(mi, total_units, &format!("soldier {}/{total_models}: {m}", mi + 1));
-                    let Some(cache) = &side_cache else { continue };
-                    let res = cache.bake_soldier(m, &side_out_s);
-                    match res {
-                        Ok(b) => {
-                            for (name, f) in b.texture_flags {
-                                *flags.entry(name).or_default() |= f;
-                            }
-                            produced_textures.extend(b.textures.iter().map(|t| t.to_ascii_lowercase()));
-                            self.mark_model(m);
-                            for c in mod_classes {
-                                if c.props.iter().any(|(k, v)| *k == geometry && v.trim().eq_ignore_ascii_case(m)) {
-                                    for (k, v) in &c.props {
-                                        if *k == low_res {
-                                            self.mark_model(&v.trim().to_ascii_lowercase());
-                                        }
+        // Models bake side by side; what each asks of the shared sheets is
+        // then applied in model order, which decides the flags a weapon sees
+        // and the last word on each sheet.
+        let jobs: Vec<(&String, &ModelKind)> = wanted
+            .iter()
+            .filter(|(_, k)| **k != ModelKind::Vehicle)
+            .collect();
+        if let Some(cache) = &side_cache {
+            if !jobs.is_empty() {
+                self.sub_progress(0, total_units, &format!("{} models", jobs.len()));
+            }
+            let baked = crate::soldier::in_parallel(
+                &jobs,
+                |(m, kind)| match kind {
+                    ModelKind::Soldier => cache.soldier_model(m, &side_out_s).map(Baked::Soldier),
+                    _ => cache.weapon_model(m, &side_out_s).map(Baked::Weapon),
+                },
+                |done, (m, _)| {
+                    self.sub_progress(
+                        done,
+                        total_units,
+                        &format!("model {done}/{}: {m}", jobs.len()),
+                    );
+                },
+            );
+            let mut plan = crate::soldier::Plan::default();
+            for ((m, kind), res) in jobs.iter().zip(baked) {
+                match res {
+                    Ok(Baked::Soldier((b, requests))) => {
+                        let sheets = cache.sheets()?;
+                        for request in &requests {
+                            plan.add(sheets, request);
+                        }
+                        for (name, f) in b.texture_flags {
+                            *flags.entry(name).or_default() |= f;
+                        }
+                        produced_textures.extend(b.textures.iter().map(|t| t.to_ascii_lowercase()));
+                        self.mark_model(m);
+                        for c in mod_classes {
+                            if c.props
+                                .iter()
+                                .any(|(k, v)| *k == geometry && v.trim().eq_ignore_ascii_case(m))
+                            {
+                                for (k, v) in &c.props {
+                                    if *k == low_res {
+                                        self.mark_model(&v.trim().to_ascii_lowercase());
                                     }
                                 }
                             }
-                            self.hide_missing(&format!("side_{g}/soldiers"), m);
                         }
-                        Err(e) => self
-                            .r
+                        self.hide_missing(&format!("side_{g}/soldiers"), m);
+                    }
+                    Ok(Baked::Weapon((w, mut request))) => {
+                        request.flags = crate::soldier::merge_prior(request.flags, &flags);
+                        plan.add(cache.sheets()?, &request);
+                        produced_textures.extend(w.textures.iter().map(|t| t.to_ascii_lowercase()));
+                        self.mark_model(m);
+                        self.hide_missing(&format!("side_{g}/weapons"), m);
+                        let pc_fp = format!("side_{g}/pc_first_person/weapons/{m}.glb");
+                        if self.stock.exists(&pc_fp) {
+                            self.removed.insert(pc_fp);
+                        }
+                    }
+                    Err(e) => {
+                        let what = if **kind == ModelKind::Soldier {
+                            "soldier"
+                        } else {
+                            "weapon"
+                        };
+                        self.r
                             .warnings
-                            .push(format!("{}: soldier {m} kept stock ({e:#})", self.op.source)),
+                            .push(format!("{}: {what} {m} kept stock ({e:#})", self.op.source));
                     }
                 }
-                ModelKind::Weapon => {
-                    self.sub_progress(mi, total_units, &format!("weapon {}/{total_models}: {m}", mi + 1));
-                    let res = match &side_cache {
-                        Some(cache) => cache.bake_weapon(m, &side_out_s, &flags),
-                        None => crate::soldier::bake_weapon_with(&src_s, m, &side_out_s, Some(&src_s), &flags),
-                    };
-                    match res {
-                        Ok(w) => {
-                            produced_textures.extend(w.textures.iter().map(|t| t.to_ascii_lowercase()));
-                            self.mark_model(m);
-                            self.hide_missing(&format!("side_{g}/weapons"), m);
-                            let pc_fp = format!("side_{g}/pc_first_person/weapons/{m}.glb");
-                            if self.stock.exists(&pc_fp) {
-                                self.removed.insert(pc_fp);
-                            }
-                        }
-                        Err(e) => self
-                            .r
-                            .warnings
-                            .push(format!("{}: weapon {m} kept stock ({e:#})", self.op.source)),
-                    }
-                }
-                ModelKind::Vehicle => {}
+            }
+            if !plan.is_empty() {
+                self.sub_progress(
+                    jobs.len(),
+                    total_units,
+                    &format!("writing {} textures", plan.len()),
+                );
+                cache
+                    .sheets()?
+                    .write(&plan, &side_out.join("textures"), cache.pc_textures())?;
             }
         }
+        // The vehicle bake loads its own copies, so the side's go first.
+        let side_pc = side_cache.and_then(crate::soldier::SideBakeCache::into_pc_textures);
 
         if wanted.values().any(|k| *k == ModelKind::Vehicle)
             || self.changed("coll").iter().any(|c| vehicle_models.contains(c))
@@ -672,7 +711,7 @@ impl Job<'_> {
                 }
             }
             let loaded_pc;
-            let pc_ref = match side_cache.as_ref().and_then(|c| c.pc_textures()) {
+            let pc_ref = match side_pc.as_ref() {
                 Some(pc) => pc,
                 None => {
                     loaded_pc = crate::tier::PcTextures::load(&src_s)?;

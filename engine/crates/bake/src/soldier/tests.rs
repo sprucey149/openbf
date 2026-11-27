@@ -999,3 +999,59 @@ fn nabooqueen_folds_root_a_spine_into_bone_a_spine() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_skeleton_without_clavicles_gets_them_back_from_the_rig() {
+    let bone = |name: &str, parent, t| mungefs::skel::SkelBone {
+        name: name.to_owned(),
+        crc: crc32_lower(name),
+        parent,
+        rows: Mat3::IDENTITY.to_cols_array_2d(),
+        t,
+    };
+    let joint = |name: &str, parent: &str, rest_pos| mungefs::anim::RigJoint {
+        crc: crc32_lower(name),
+        rest_rot: Quat::from_rotation_y(1.0).to_array(),
+        rest_pos,
+        parent_crc: if parent.is_empty() {
+            0
+        } else {
+            crc32_lower(parent)
+        },
+        first_child_crc: 0,
+        next_sibling_crc: 0,
+    };
+    let mut skel = Skeleton {
+        name: "droid".to_owned(),
+        bones: vec![
+            bone("bone_ribcage", None, [0.0, 1.5, 0.0]),
+            bone("bone_l_upperarm", Some(0), [0.1, 0.0, 0.2]),
+        ],
+    };
+    let rig = mungefs::anim::Rig {
+        name: "human_0".to_owned(),
+        joints: vec![
+            joint("bone_ribcage", "", [0.0; 3]),
+            joint("bone_l_clavicle", "bone_ribcage", [0.2, 0.0, 0.0]),
+            joint("bone_l_upperarm", "bone_l_clavicle", [0.2, 0.0, 0.0]),
+        ],
+    };
+    let before = crate::skin_glb::global_binds(&bones_of(&skel));
+    let empty = SkinnedModel {
+        name: "droid".to_owned(),
+        bones: bones_of(&skel),
+        segments: Vec::new(),
+    };
+    assert!(restore_rig_ancestors(&mut skel, &rig).unwrap());
+    assert!(fold_unrigged_ancestors(&mut skel, &rig, &empty));
+    let clavicle = skel.index_of("bone_l_clavicle").unwrap();
+    assert_eq!(clavicle, 2, "appended, so skin joint indices stay");
+    assert_eq!(skel.bones[clavicle].parent, Some(0));
+    assert_eq!(skel.bones[1].parent, Some(clavicle));
+    let after = crate::skin_glb::global_binds(&bones_of(&skel));
+    assert!(
+        after[1].abs_diff_eq(before[1], 1e-5),
+        "the arm's bind holds"
+    );
+    assert!(!restore_rig_ancestors(&mut skel, &rig).unwrap());
+}

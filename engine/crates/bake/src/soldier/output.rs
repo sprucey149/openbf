@@ -3,7 +3,7 @@
 
 use super::{
     clip_to_tracks, find_clip, find_soldier, model_skins, pose_rig, rigid_or_skinned_model,
-    BakedSoldier, ClipMeta, SoldierAnims, SEAT_CLIPS, SOLDIER_CLIPS,
+    BakedSoldier, ClipMeta, LvlSheets, Plan, Request, SoldierAnims, SEAT_CLIPS, SOLDIER_CLIPS,
 };
 use crate::anim_sets;
 use crate::skin_glb::{skinned_to_glb, Clip};
@@ -92,6 +92,7 @@ pub struct SideBakeCache {
     own_combos: Option<manifest::combo::ComboSet>,
     anim: Option<AnimBakeCache>,
     low_same_sheets: bool,
+    sheets: std::sync::OnceLock<std::result::Result<LvlSheets, String>>,
 }
 
 struct AnimBakeCache {
@@ -212,6 +213,7 @@ impl SideBakeCache {
             own_combos,
             anim,
             low_same_sheets: false,
+            sheets: std::sync::OnceLock::new(),
         })
     }
 
@@ -226,7 +228,47 @@ impl SideBakeCache {
         self.pc.as_ref()
     }
 
+    /// Free the LVLs, animation banks and sheets, keeping the PC textures.
+    pub fn into_pc_textures(self) -> Option<crate::tier::PcTextures> {
+        self.pc
+    }
+
+    /// The LVL's own sheets, decoded on first use and kept.
+    pub(crate) fn sheets(&self) -> Result<&LvlSheets> {
+        self.sheets
+            .get_or_init(|| {
+                mungefs::open(&self.buf)
+                    .map_err(|e| anyhow!("{e}"))
+                    .and_then(LvlSheets::parse)
+                    .map_err(|e| format!("{e:#}"))
+            })
+            .as_ref()
+            .map_err(|e| anyhow!("{e}"))
+    }
+
+    /// Write what `requests` ask of the LVL's sheets into `<outdir>/textures`.
+    fn write_sheets(&self, requests: &[Request], outdir: &str) -> Result<()> {
+        let sheets = self.sheets()?;
+        let mut plan = Plan::default();
+        for request in requests {
+            plan.add(sheets, request);
+        }
+        sheets.write(&plan, &Path::new(outdir).join("textures"), self.pc.as_ref())
+    }
+
     pub fn bake_soldier(&self, model: &str, outdir: &str) -> Result<BakedSoldier> {
+        let (baked, requests) = self.soldier_model(model, outdir)?;
+        self.write_sheets(&requests, outdir)?;
+        Ok(baked)
+    }
+
+    /// [`Self::bake_soldier`] without its sheets: they are returned as
+    /// requests, in the order to apply them.
+    pub(crate) fn soldier_model(
+        &self,
+        model: &str,
+        outdir: &str,
+    ) -> Result<(BakedSoldier, Vec<Request>)> {
         let inner = mungefs::open(&self.buf).map_err(|e| anyhow!("{e}"))?;
         let (m, mut skel) = find_soldier(inner, model)?;
         crate::dlc_attachment::canonical_bind(inner, &mut skel)?;
@@ -289,11 +331,15 @@ impl SideBakeCache {
                 Some(pose) => super::append_rig_attachment(&mut skel, &pose.rig, "hp_weapons")?,
                 None => false,
             };
-            let folded = match pose.as_ref().map(|p| &p.rig).or(anim.human_rig.as_ref()) {
-                Some(rig) => super::fold_unrigged_ancestors(&mut skel, rig, &sm),
-                None => false,
+            let (restored, folded) = match pose.as_ref().map(|p| &p.rig).or(anim.human_rig.as_ref())
+            {
+                Some(rig) => (
+                    super::restore_rig_ancestors(&mut skel, rig)?,
+                    super::fold_unrigged_ancestors(&mut skel, rig, &sm),
+                ),
+                None => (false, false),
             };
-            if attached || folded {
+            if attached || restored || folded {
                 sm.bones = super::bones_of(&skel);
             }
             let bones: Vec<String> = skel.bones.iter().map(|b| b.name.clone()).collect();
@@ -527,18 +573,25 @@ impl SideBakeCache {
             &out.join("soldiers").join(format!("{}.skins.ron", m.name)),
             &file,
         )?;
-        let mut textures = bake_textures_flagged(inner, &wanted, &flags, out, self.pc.as_ref())?;
-        for texture in super::lod::bake_or_skip(
+        let mut requests = vec![Request {
+            wanted,
+            flags: flags.clone(),
+        }];
+        requests.extend(super::lod::bake_or_skip(
             inner,
             &self.buf,
             &m,
             &skel,
             out,
-            self.pc.as_ref(),
             self.low_same_sheets,
-        ) {
-            if !textures.contains(&texture) {
-                textures.push(texture);
+        ));
+        let sheets = self.sheets()?;
+        let mut textures: Vec<String> = Vec::new();
+        for request in &requests {
+            for texture in sheets.names(&request.wanted) {
+                if !textures.contains(&texture) {
+                    textures.push(texture);
+                }
             }
         }
         for (tex, _) in &skins.overrides {
@@ -552,7 +605,7 @@ impl SideBakeCache {
 
         let (min, max) =
             crate::gltf_bin::min_max3(sm.segments.iter().flat_map(|s| s.positions.iter()));
-        Ok(BakedSoldier {
+        let baked = BakedSoldier {
             name: m.name.clone(),
             clips: clips.len(),
             missing_clips: meta.missing.clone(),
@@ -563,7 +616,8 @@ impl SideBakeCache {
             cloths: cloth_names,
             aabb: (min, max),
             texture_flags: flags,
-        })
+        };
+        Ok((baked, requests))
     }
 
     pub fn bake_weapon(
@@ -572,6 +626,16 @@ impl SideBakeCache {
         outdir: &str,
         prior: &std::collections::HashMap<String, u32>,
     ) -> Result<BakedWeapon> {
+        let (baked, mut request) = self.weapon_model(model, outdir)?;
+        request.flags = merge_prior(request.flags, prior);
+        self.write_sheets(&[request], outdir)?;
+        Ok(baked)
+    }
+
+    /// [`Self::bake_weapon`] without its sheets: they are returned as a
+    /// request carrying the model's own flags, for [`weapon_flags`]'s prior
+    /// to be ORed in.
+    pub(crate) fn weapon_model(&self, model: &str, outdir: &str) -> Result<(BakedWeapon, Request)> {
         let inner = mungefs::open(&self.buf).map_err(|e| anyhow!("{e}"))?;
         let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
         let m = chunks
@@ -604,20 +668,24 @@ impl SideBakeCache {
             .filter_map(crate::alpha::segment_texture)
             .map(|n| n.to_ascii_lowercase())
             .collect();
-        let flags = weapon_flags(&m, prior);
-        let textures = bake_textures_flagged(inner, &wanted, &flags, out, self.pc.as_ref())?;
+        let textures = self.sheets()?.names(&wanted);
+        let request = Request {
+            wanted,
+            flags: bake_flags(&m),
+        };
         let nodes = weapon_nodes(&chunks, &m.name);
         std::fs::write(
             manifest::weapon_nodes_path(out, &m.name),
             ron::ser::to_string_pretty(&nodes, crate::pretty())?,
         )?;
-        Ok(BakedWeapon {
+        let baked = BakedWeapon {
             name: m.name.clone(),
             nodes: nodes.len(),
             vertices: m.segments.iter().map(|s| s.positions.len()).sum(),
             triangles: m.segments.iter().map(|s| s.triangles.len()).sum(),
             textures,
-        })
+        };
+        Ok((baked, request))
     }
 }
 
@@ -681,74 +749,14 @@ pub fn bake_textures_flagged(
     out: &Path,
     pc: Option<&crate::tier::PcTextures>,
 ) -> Result<Vec<String>> {
-    let dir = out.join("textures");
-    std::fs::create_dir_all(&dir)?;
-    // Decode everything first: a wanted texture's `_dtl` companion can sit
-    // anywhere in the LVL, including before the base (crate::detail).
-    let all: Vec<mungefs::texture::Texture> = mungefs::content_chunks(inner)
-        .map_err(|e| anyhow!("{e}"))?
-        .iter()
-        .filter(|c| &c.tag == b"tex_")
-        .filter_map(|c| mungefs::texture::Texture::parse(c).ok())
-        .collect();
-
-    let bumps = crate::bump::lvl_companions(inner)?;
-    let mut textures: Vec<String> = Vec::new();
-    let mut tier2_written = 0usize;
-    for t in &all {
-        let name = t.name.to_ascii_lowercase();
-        if !wanted.contains(&name) || textures.contains(&name) {
-            continue;
-        }
-        let flags = tex_flags
-            .get(&name)
-            .copied()
-            .unwrap_or(crate::detail::ALPHA_IS_MEANINGFUL);
-        // Both tiers, side by side, exactly as `crate::map:1004-1033` writes
-        // them (PLAN §Classic-plus assets, the maintainer 2026-09-03): the base file is
-        // ALWAYS the PS2 disc's pixels — the sim reads only that — and the
-        // classic-plus override, where the chain has one, is written beside it
-        // as `<name>.tier2.ktx2` for the runtime to pick between.
-        //
-        // The alpha state is the PS2 texture's on BOTH files. The side bake
-        // decides it here from the per-texture OR of the material flags (the
-        // map bake decides it per draw), so the flags land on whichever
-        // pixels are written; and where a draw does want alpha, the override
-        // takes the PS2 mask instead of its own channel, which is gloss/spec
-        // on several shipped sheets — a MASK draw would otherwise cut out
-        // along a mask nobody authored and the tier flip would change the
-        // silhouette.
-        let mut r = crate::tier::Resolved::from_ps2(t);
-        let usage = crate::tier::Usage {
-            sky: false,
-            alpha_carried: flags & crate::detail::ALPHA_IS_MEANINGFUL != 0,
-        };
-        let mut tier2 = crate::tier::tier2(t, pc, usage);
-        if flags & crate::detail::ALPHA_IS_MEANINGFUL == 0 {
-            r.make_opaque();
-            if let Some(o) = tier2.as_mut() {
-                o.make_opaque();
-            }
-        } else if let Some(o) = tier2.as_mut() {
-            o.take_alpha_from(&r);
-        }
-        r.write_pair(&dir, &name, tier2.as_ref())?;
-        if tier2.is_some() {
-            tier2_written += 1;
-        }
-        // The detail companion stays PS2: `tier::tier2` refuses a
-        // detail-compressed base outright (exclusion 1), so a base and its
-        // companion cannot come from two different tiers.
-        crate::detail::write_detail_for(&dir, t, &all)?;
-        crate::bump::write_bump_for(&dir, &name, &bumps, &all)?;
-        textures.push(name);
-    }
-    if pc.is_some() {
-        eprintln!(
-            "  tier 2 written beside the PS2 base: {tier2_written} of {}",
-            textures.len()
-        );
-    }
+    let sheets = LvlSheets::parse(inner)?;
+    let request = Request {
+        wanted: wanted.to_vec(),
+        flags: tex_flags.clone(),
+    };
+    let mut plan = Plan::default();
+    let textures = plan.add(&sheets, &request);
+    sheets.write(&plan, &out.join("textures"), pc)?;
     Ok(textures)
 }
 

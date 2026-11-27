@@ -3,7 +3,8 @@
 //! `engine/branding_baked/windows/openbf.ico` with `scripts/make_icons.py`, and
 //! names that file in `OPENBF_ICON` when it runs cargo. `rc.exe` compiles it into
 //! `openbf.res` under `OUT_DIR`, and the `cargo:rustc-link-arg-bin` here hands that
-//! resource to `link.exe`, so `game.exe` carries the icon in its resource directory
+//! resource to `link.exe`, so `game.exe` (and the launcher, whose build script includes
+//! this file) carries the icon in its resource directory
 //! and Explorer, a shortcut and the taskbar show it instead of the generic one. The
 //! icon is data the OS reads, not the game's: nothing changes at run time.
 //!
@@ -17,8 +18,6 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-
-const BIN: &str = "game";
 
 /// One icon group. The Win32 path APIs accept `/`, so the same text is read by both
 /// `rc.exe` and `windres`; the `.rc` lives beside the `.res` in `OUT_DIR`.
@@ -119,8 +118,8 @@ fn windres_compile(tool: &PathBuf, rc_src: &Path, res: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Write the `.rc`, compile it, and ask the linker to add the `.res` to the game.
-fn emit(ico: &Path, out: &Path) {
+/// Write the `.rc`, compile it, and ask the linker to add the `.res` to `bin`.
+fn emit(ico: &Path, out: &Path, bin: &str) {
     let rc_src = out.join("openbf.rc");
     let res = out.join("openbf.res");
     if std::fs::write(&rc_src, rc_text(ico)).is_err() {
@@ -149,7 +148,7 @@ fn emit(ico: &Path, out: &Path) {
     let Some(tool) = tool else {
         println!(
             "cargo:warning=branding: no resource compiler for a {env} windows target, \
-                  so the game keeps the generic icon"
+                  so {bin} keeps the generic icon"
         );
         return;
     };
@@ -161,10 +160,10 @@ fn emit(ico: &Path, out: &Path) {
     if ok {
         // No quotes here: `link.exe` reads a path with them as `\path\` and asks for
         // `<path>.obj`. Cargo's other link arg in this file, `/STACK:8388608`, is plain too.
-        println!("cargo:rustc-link-arg-bin={BIN}={}", res.display());
+        println!("cargo:rustc-link-arg-bin={bin}={}", res.display());
     } else {
         println!(
-            "cargo:warning=branding: {} failed, so the game keeps the generic icon",
+            "cargo:warning=branding: {} failed, so {bin} keeps the generic icon",
             tool.display()
         );
     }
@@ -179,7 +178,7 @@ fn icon_to_embed(target_os: Option<&str>, icon: Option<PathBuf>) -> Option<PathB
     icon.filter(|p| p.is_file())
 }
 
-pub fn link_icon() {
+pub fn link_icon(bin: &str) {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").ok();
     if target_os.as_deref() != Some("windows") {
         return;
@@ -197,7 +196,7 @@ pub fn link_icon() {
         return;
     };
     match std::env::var("OUT_DIR") {
-        Ok(out) => emit(&ico, Path::new(&out)),
+        Ok(out) => emit(&ico, Path::new(&out), bin),
         Err(_) => {
             println!("cargo:warning=branding: OUT_DIR is not set, so the icon is not embedded")
         }

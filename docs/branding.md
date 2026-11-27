@@ -41,14 +41,17 @@ the pack over the icon. A previous render's containers are kept.
 
 - **Windows.** Windows shows the icon stored in the `.exe`. pack.py runs cargo with
   `OPENBF_ICON` set to `engine/branding_baked/windows/openbf.ico`.
-  `engine/crates/game/build.rs` runs `build_icon.rs`, which finds `rc.exe` (through
+  `engine/crates/game/build.rs` and `engine/crates/launcher/build.rs` run the same
+  `build_icon.rs`, which finds `rc.exe` (through
   `WindowsSdkDir`, then `C:\Program Files (x86)\Windows Kits\10\bin\<version>\x64`,
   then `PATH`; `windres` on a MinGW target), compiles the `.ico` into `openbf.res` in
-  `OUT_DIR`, and passes it to `link.exe` with `cargo:rustc-link-arg-bin=game=…`. On
-  the first pack the `.ico` does not exist yet when the game is first built, so pack.py
-  builds the game again after rendering it. The build script watches the file, so
-  that second build relinks `game.exe` with the icon, and later packs do nothing extra
-  unless the icon changes. `dist/openbf.exe` is a copy of that binary.
+  `OUT_DIR`, and passes it to `link.exe` with `cargo:rustc-link-arg-bin=<bin>=…`
+  (`game` or `openbf-launcher`). On the first pack the `.ico` does not exist yet when
+  they are first built, so pack.py builds both again after rendering it. The build
+  scripts watch the file, so that second build relinks `game.exe` and
+  `openbf-launcher.exe` with the icon, and later packs do nothing extra unless the icon
+  changes. `dist/openbf.exe` and `dist/openbf-launcher.exe` are copies of those
+  binaries.
 - **Linux.** An executable carries no icon, so the icon comes from the icon theme and
   the application entry. pack.py writes `dist/openbf.desktop` beside the game from the
   template. `scripts/install_linux.sh` installs it to

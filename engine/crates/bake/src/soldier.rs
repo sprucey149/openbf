@@ -43,13 +43,13 @@ use std::path::Path;
 mod lod;
 mod output;
 mod render_clips;
-pub(crate) use output::bake_flags;
-#[cfg(test)]
-use output::merge_prior;
+mod sheets;
+pub(crate) use output::{bake_flags, merge_prior};
 pub use output::{
     bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, bake_weapon_with,
     set_lender, texture_flags, weapon_flags, weapon_nodes, BakedWeapon, SideBakeCache,
 };
+pub(crate) use sheets::{in_parallel, LvlSheets, Plan, Request};
 
 pub struct BakedSoldier {
     pub name: String,
@@ -478,6 +478,49 @@ pub(crate) fn append_rig_attachment(
         t: joint.rest_pos,
     });
     Ok(true)
+}
+
+/// A model `skel` may also lack a body bone the rig puts between two of its
+/// bones: a replacement side's battle droid has no clavicles and hangs its
+/// upper arms on `bone_ribcage`. The clips turn each child in the missing
+/// joint's space, and the PS2 poses on the rig, which has it
+/// (`analysis/re-soldier-skeleton-skins.md` §0.2, §1), so without the joint
+/// the limb swings off. Append each such joint at the rig's rest under the
+/// nearest rig ancestor the model has; [`fold_unrigged_ancestors`] then
+/// hangs its children from it. Existing joint indices are kept.
+///
+/// A model with `bone_abdomen` (General Grievous) is left as it is: its own
+/// rig is one [`pose_rig`] refuses, so the rig at hand is not its hierarchy.
+pub(crate) fn restore_rig_ancestors(skel: &mut Skeleton, rig: &mungefs::anim::Rig) -> Result<bool> {
+    let abdomen = crc32_lower("bone_abdomen");
+    if skel.bones.iter().any(|b| b.crc == abdomen) {
+        return Ok(false);
+    }
+    let mut changed = false;
+    for c in 0..skel.bones.len() {
+        let mut missing: Vec<&str> = Vec::new();
+        let mut at = skel.bones[c].crc;
+        let anchored = loop {
+            let Some(parent) = rig.joint(at).map(|j| j.parent_crc).filter(|&p| p != 0) else {
+                break false;
+            };
+            if skel.bones.iter().any(|b| b.crc == parent) {
+                break true;
+            }
+            let name = BF1_RIG_BONES.iter().find(|n| crc32_lower(n) == parent);
+            match name {
+                Some(name) if missing.len() < BF1_RIG_BONES.len() => missing.push(name),
+                _ => break false,
+            }
+            at = parent;
+        };
+        if anchored {
+            for name in missing.iter().rev() {
+                changed |= append_rig_attachment(skel, rig, name)?;
+            }
+        }
+    }
+    Ok(changed)
 }
 
 /// The default soldier rig: the human `zaf_` rig (BF1 `human_animation_0`,
