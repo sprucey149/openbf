@@ -374,6 +374,9 @@ pub struct CpuTexture {
     /// material with `MTRL` bit 0x20 draws this sheet per-pixel lit
     /// (`render::BumpDesc`).
     pub bump: Option<Box<CpuTexture>>,
+    /// PC environment-cube companion (`<base>.env.ktx2`, `bake::envmap`):
+    /// the six faces stacked top to bottom (`render::EnvDesc`).
+    pub env: Option<Box<CpuTexture>>,
 }
 
 impl CpuTexture {
@@ -2019,12 +2022,14 @@ pub fn load_ktx2(bytes: &[u8]) -> Result<CpuTexture> {
         extra_mips,
         detail: None,
         bump: None,
+        env: None,
     })
 }
 
 /// Load the texture `name` at [`texture_tier`], plus its `<name>.dtl.ktx2`
 /// detail companion when the bake wrote one (the file's presence is the PS2
-/// detailCompressed flag) and its `<name>.bump.ktx2` PC normal map likewise.
+/// detailCompressed flag), its `<name>.bump.ktx2` PC normal map and its
+/// `<name>.env.ktx2` PC environment cube likewise.
 ///
 /// At [`TextureTier::Pc`] the override `<name>.tier2.ktx2` wins WHEN IT
 /// EXISTS — see [`Manifest::texture_tier2`] for which — and it brings its own
@@ -2052,6 +2057,16 @@ fn decode_texture(dir: &Path, name: &str) -> Result<CpuTexture> {
         tex.bump = Some(Box::new(
             load_ktx2(&bytes).with_context(|| format!("{name}.bump"))?,
         ));
+    }
+    if let Ok(bytes) = pak::read(dir.join(format!("{name}.env.ktx2"))) {
+        let cube = load_ktx2(&bytes).with_context(|| format!("{name}.env"))?;
+        anyhow::ensure!(
+            cube.height == cube.width * 6,
+            "{name}.env: {}x{} is not six stacked faces",
+            cube.width,
+            cube.height
+        );
+        tex.env = Some(Box::new(cube));
     }
     Ok(tex)
 }

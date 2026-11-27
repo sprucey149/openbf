@@ -15,6 +15,7 @@ mod light_path;
 mod lod_switch;
 mod particle_blend;
 mod pc_bump;
+mod pc_envmap;
 mod shadow;
 mod skinned;
 mod sky_shell;

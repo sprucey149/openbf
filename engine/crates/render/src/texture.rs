@@ -64,6 +64,20 @@ pub struct BumpDesc<'a> {
     pub mips: &'a [&'a [u8]],
 }
 
+/// A PC Battlefront II environment cube (`TNAM` slot 3 of a material with
+/// `MTRL` bit 0x100, baked beside its diffuse as `<name>.env.ktx2` by
+/// `bake::envmap`). A texture that carries one has the PC's environment pass
+/// as its specular pass (`fs_spec`, `analysis/re-pc-envmap.md`).
+#[derive(Debug, Clone, Copy)]
+pub struct EnvDesc<'a> {
+    /// The side of one face at level 0.
+    pub size: u32,
+    /// Mip chain, level 0 first: level `i` is the six faces of side
+    /// `size >> i` in D3D order (+X -X +Y -Y +Z -Z), RGBA8, one after the
+    /// other.
+    pub mips: &'a [&'a [u8]],
+}
+
 /// CPU-side description of one texture upload.
 #[derive(Debug, Clone, Copy)]
 pub struct TextureDesc<'a> {
@@ -82,6 +96,8 @@ pub struct TextureDesc<'a> {
     pub detail: Option<DetailDesc<'a>>,
     /// Optional PC normal map; see [`BumpDesc`].
     pub bump: Option<BumpDesc<'a>>,
+    /// Optional PC environment cube; see [`EnvDesc`].
+    pub env: Option<EnvDesc<'a>>,
     /// UV units per second; zero for static materials. BF2 models use baked
     /// byte/255 rates and the 255 s material clock. Water uses the wrapped
     /// `time` clock and its `fx__ Effect("Water")` velocity / INFO5 (magnitude
@@ -117,10 +133,13 @@ struct Views {
     detail: Option<wgpu::TextureView>,
     display: wgpu::TextureView,
     bump: Option<wgpu::TextureView>,
+    /// The environment cube, or the renderer's blank one, unread
+    /// (`material.bump.y` is 0).
+    env: wgpu::TextureView,
 }
 
 /// `MaterialParams` in `shader.wgsl`: detail, scroll, the UV offset, then
-/// the PC bump switch.
+/// the PC bump and environment switches.
 const PARAMS_LEN: usize = 16;
 /// The byte offset of `MaterialParams::offset`.
 const OFFSET_AT: u64 = 32;
@@ -134,6 +153,7 @@ impl GpuTexture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
+        no_env: &wgpu::TextureView,
         desc: &TextureDesc<'_>,
     ) -> Result<Self, RenderError> {
         let (view, display_view) = upload_level_views(
@@ -157,6 +177,12 @@ impl GpuTexture {
             Some(b) => Some(upload_levels(
                 device, queue, b.width, b.height, b.mips, false, desc.label,
             )?),
+            None => None,
+        };
+
+        // The cube's texels stay gamma bytes: the pass adds them as the PC does.
+        let env_view = match &desc.env {
+            Some(e) => Some(upload_cube(device, queue, e, desc.label)?),
             None => None,
         };
 
@@ -201,7 +227,7 @@ impl GpuTexture {
             0.0,
             0.0,
             f32::from(u8::from(bump_view.is_some())),
-            0.0,
+            f32::from(u8::from(env_view.is_some())),
             0.0,
             0.0,
         ];
@@ -211,6 +237,7 @@ impl GpuTexture {
             detail: detail_view,
             display: display_view,
             bump: bump_view,
+            env: env_view.unwrap_or_else(|| no_env.clone()),
         };
         Ok(Self::bind(device, layout, desc.label, views, params))
     }
@@ -247,6 +274,7 @@ impl GpuTexture {
                     // No normal map: the base view, unread (`material.bump.x`
                     // is 0).
                     bindings::texture_view(5, views.bump.as_ref().unwrap_or(&views.view)),
+                    bindings::texture_view(6, &views.env),
                 ],
             },
         );
@@ -274,6 +302,87 @@ impl GpuTexture {
         self.params[8..10].copy_from_slice(&offset);
         queue.write_buffer(&self.params_buf, OFFSET_AT, bytemuck::cast_slice(&offset));
     }
+}
+
+/// A 1x1 cube of zeroes (wgpu clears a new texture), for the textures that
+/// carry no environment cube.
+pub(crate) fn blank_cube(device: &wgpu::Device) -> wgpu::TextureView {
+    cube_view(&cube_texture(device, 1, 1, None))
+}
+
+fn cube_texture(device: &wgpu::Device, size: u32, mips: u32, label: Option<&str>) -> wgpu::Texture {
+    crate::made::texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label,
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: mips,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        },
+    )
+}
+
+fn cube_view(texture: &wgpu::Texture) -> wgpu::TextureView {
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::Cube),
+        ..Default::default()
+    })
+}
+
+fn upload_cube(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    env: &EnvDesc<'_>,
+    label: Option<&str>,
+) -> Result<wgpu::TextureView, RenderError> {
+    let longest = (u32::BITS - env.size.leading_zeros()) as usize;
+    if env.mips.is_empty() || env.mips.len() > longest {
+        return Err(RenderError::BadTexture(
+            "environment cube: zero-sized, empty or over-long mip chain".into(),
+        ));
+    }
+    for (i, level) in env.mips.iter().enumerate() {
+        let side = mip_extent(env.size, i as u32);
+        let expected = (side * side * 4 * 6) as usize;
+        if level.len() != expected {
+            return Err(RenderError::BadTexture(format!(
+                "environment cube mip {i}: got {} bytes, expected {expected} (6 x {side}x{side})",
+                level.len()
+            )));
+        }
+    }
+    let texture = cube_texture(device, env.size, env.mips.len() as u32, label);
+    for (i, level) in env.mips.iter().enumerate() {
+        let side = mip_extent(env.size, i as u32);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: i as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            level,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * side),
+                rows_per_image: Some(side),
+            },
+            wgpu::Extent3d {
+                width: side,
+                height: side,
+                depth_or_array_layers: 6,
+            },
+        );
+    }
+    Ok(cube_view(&texture))
 }
 
 /// Create a 2D texture from a tightly-packed RGBA8 mip chain and return its view.

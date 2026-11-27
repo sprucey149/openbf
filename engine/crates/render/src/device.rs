@@ -281,7 +281,13 @@ impl Renderer {
     }
 
     pub fn add_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureHandle, RenderError> {
-        let tex = GpuTexture::upload(&self.device, &self.queue, &self.texture_bgl, desc)?;
+        let tex = GpuTexture::upload(
+            &self.device,
+            &self.queue,
+            &self.texture_bgl,
+            &self.no_env,
+            desc,
+        )?;
         self.textures.push(tex);
         Ok(TextureHandle(self.textures.len() as u32 - 1))
     }

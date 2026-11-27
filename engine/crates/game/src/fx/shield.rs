@@ -67,6 +67,7 @@ impl Fx {
                     extra_mips: Vec::new(),
                     detail: None,
                     bump: None,
+                    env: None,
                 },
                 "ordnance_shell",
             )

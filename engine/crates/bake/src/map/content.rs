@@ -1050,6 +1050,7 @@ pub(super) fn bake_content(
         }
     }
     let bumps = crate::bump::companions(parsed_models.values());
+    let envs = crate::envmap::companions(parsed_models.values());
     drop(parsed_models);
 
     // Textures: write each one, plus a `<base>.dtl.ktx2` companion for every
@@ -1421,6 +1422,7 @@ pub(super) fn bake_content(
             crate::remove_optional_file(&tex_dir.join(crate::detail::detail_file(&lower)))?;
         }
         crate::bump::write_bump_for(&tex_dir, &lower, &bumps, &all_textures)?;
+        crate::envmap::write_env_for(&tex_dir, &lower, &envs, &expanded)?;
         if let Some(o) = &tier2 {
             let file = format!("{}.tier2.ktx2", t.name);
             texture_tiers.push((lower.clone(), o.tier.as_str().to_owned()));

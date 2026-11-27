@@ -256,6 +256,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                         srgb: false,
                         detail: None,
                         bump: None,
+                        env: None,
                         scroll: info.uv_velocity,
                         uv_scale: [1.0, 1.0],
                         label: Some(name),

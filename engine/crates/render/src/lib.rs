@@ -138,7 +138,7 @@ pub use sun_flare::SunFlare;
 pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
-pub use texture::{BumpDesc, DetailDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
+pub use texture::{BumpDesc, DetailDesc, EnvDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
 pub use reticle::{ReticlePass, WorldReticle};
 pub use underwater::UnderwaterTint;
 pub use visor::{Visor, VisorEye, VisorPass};
@@ -377,6 +377,8 @@ pub struct Renderer {
     point_lights: Vec<PointLight>,
     point_table_clear: bool,
     texture_bgl: wgpu::BindGroupLayout,
+    /// The cube bound for a texture without one ([`EnvDesc`]).
+    no_env: wgpu::TextureView,
     meshes: Vec<GpuMesh>,
     textures: Vec<GpuTexture>,
     /// 1x1 white texture serving `DrawCmd { texture: None, .. }`.

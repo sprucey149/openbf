@@ -95,15 +95,13 @@ pub fn companions<'a>(models: impl IntoIterator<Item = &'a Model>) -> HashMap<St
     out
 }
 
-/// [`companions`] over every `modl` of an LVL's content.
-pub fn lvl_companions(inner: &[u8]) -> Result<HashMap<String, Companion>> {
-    let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
-    let models: Vec<Model> = chunks
+/// Every `modl` among an LVL's content chunks that parses.
+pub fn lvl_models(chunks: &[mungefs::Chunk<'_>]) -> Vec<Model> {
+    chunks
         .iter()
         .filter(|c| &c.tag == b"modl")
         .filter_map(|c| Model::parse(c).ok())
-        .collect();
-    Ok(companions(&models))
+        .collect()
 }
 
 /// The companion's texels: the normal map's mips, alpha replaced by 255

@@ -31,6 +31,19 @@ pub(crate) fn texture_layout(binding: u32, filterable: bool) -> wgpu::BindGroupL
     }
 }
 
+pub(crate) fn cube_layout(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::Cube,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
 pub(crate) fn sampler_layout(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
