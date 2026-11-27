@@ -1055,3 +1055,70 @@ fn a_skeleton_without_clavicles_gets_them_back_from_the_rig() {
     );
     assert!(!restore_rig_ancestors(&mut skel, &rig).unwrap());
 }
+
+#[test]
+fn a_skeleton_without_bone_root_gets_it_back_with_the_spine_joint() {
+    let bone = |name: &str, parent, t| mungefs::skel::SkelBone {
+        name: name.to_owned(),
+        crc: crc32_lower(name),
+        parent,
+        rows: Mat3::IDENTITY.to_cols_array_2d(),
+        t,
+    };
+    let joint = |name: &str, parent: &str| mungefs::anim::RigJoint {
+        crc: crc32_lower(name),
+        rest_rot: Quat::from_rotation_y(1.0).to_array(),
+        rest_pos: [0.1, 0.0, 0.0],
+        parent_crc: if parent.is_empty() {
+            0
+        } else {
+            crc32_lower(parent)
+        },
+        first_child_crc: 0,
+        next_sibling_crc: 0,
+    };
+    // The game's rig hangs `bone_root` on a joint no model carries; the
+    // model may or may not have a `DummyRoot`.
+    for above in ["DummyRoot", ""] {
+        let mut skel = Skeleton {
+            name: "trooper".to_owned(),
+            bones: vec![
+                bone("DummyRoot", None, [0.0; 3]),
+                bone("bone_b_spine", Some(0), [0.0, 1.3, 0.0]),
+                bone("bone_pelvis", Some(0), [0.0, 1.1, 0.0]),
+            ],
+        };
+        let joints = vec![
+            joint("bone_root", "effector_root"),
+            joint("bone_a_spine", "bone_root"),
+            joint("bone_b_spine", "bone_a_spine"),
+            joint("bone_pelvis", "bone_root"),
+        ];
+        let rig = mungefs::anim::Rig {
+            name: "human_0".to_owned(),
+            joints,
+        };
+        if above.is_empty() {
+            skel.bones[0].name = "other".to_owned();
+            skel.bones[0].crc = crc32_lower("other");
+        }
+        let before = crate::skin_glb::global_binds(&bones_of(&skel));
+        let empty = SkinnedModel {
+            name: "trooper".to_owned(),
+            bones: bones_of(&skel),
+            segments: Vec::new(),
+        };
+        assert!(restore_rig_ancestors(&mut skel, &rig).unwrap());
+        assert!(fold_unrigged_ancestors(&mut skel, &rig, &empty));
+        let root = skel.index_of("bone_root").unwrap();
+        let spine = skel.index_of("bone_a_spine").unwrap();
+        assert_eq!(skel.bones[root].parent, (!above.is_empty()).then_some(0));
+        assert_eq!(skel.bones[spine].parent, Some(root));
+        assert_eq!(skel.bones[1].parent, Some(spine));
+        assert_eq!(skel.bones[2].parent, Some(root));
+        let after = crate::skin_glb::global_binds(&bones_of(&skel));
+        for (a, b) in after.iter().zip(&before) {
+            assert!(a.abs_diff_eq(*b, 1e-5), "the model's binds hold");
+        }
+    }
+}

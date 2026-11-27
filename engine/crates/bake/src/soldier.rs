@@ -480,6 +480,28 @@ pub(crate) fn append_rig_attachment(
     Ok(true)
 }
 
+/// The rig's `bone_root` at its rest, under the model's `DummyRoot` or as a
+/// root of its own ([`restore_rig_ancestors`]).
+fn append_rig_root(skel: &mut Skeleton, rig: &mungefs::anim::Rig) -> bool {
+    let crc = crc32_lower("bone_root");
+    if skel.bones.iter().any(|b| b.crc == crc) {
+        return false;
+    }
+    let Some(joint) = rig.joint(crc) else {
+        return false;
+    };
+    let parent = skel.index_of("DummyRoot");
+    let rotation = Mat3::from_quat(Quat::from_array(joint.rest_rot).normalize());
+    skel.bones.push(mungefs::skel::SkelBone {
+        name: "bone_root".to_owned(),
+        crc,
+        parent,
+        rows: rotation.to_cols_array_2d(),
+        t: joint.rest_pos,
+    });
+    true
+}
+
 /// A model `skel` may also lack a body bone the rig puts between two of its
 /// bones: a replacement side's battle droid has no clavicles and hangs its
 /// upper arms on `bone_ribcage`. The clips turn each child in the missing
@@ -488,6 +510,11 @@ pub(crate) fn append_rig_attachment(
 /// the limb swings off. Append each such joint at the rig's rest under the
 /// nearest rig ancestor the model has; [`fold_unrigged_ancestors`] then
 /// hangs its children from it. Existing joint indices are kept.
+///
+/// A PC mod's model may lack `bone_root` too, hanging `bone_b_spine` and
+/// `bone_pelvis` straight on `DummyRoot`: it comes back with the joints
+/// below it. The rig hangs it on a joint no model carries, so it goes on the
+/// model's `DummyRoot`, or becomes a root where there is none.
 ///
 /// A model with `bone_abdomen` (General Grievous) is left as it is: its own
 /// rig is one [`pose_rig`] refuses, so the rig at hand is not its hierarchy.
@@ -501,22 +528,31 @@ pub(crate) fn restore_rig_ancestors(skel: &mut Skeleton, rig: &mungefs::anim::Ri
         let mut missing: Vec<&str> = Vec::new();
         let mut at = skel.bones[c].crc;
         let anchored = loop {
+            // Nothing above `bone_root` is a body joint.
+            let top = missing.last() == Some(&"bone_root");
             let Some(parent) = rig.joint(at).map(|j| j.parent_crc).filter(|&p| p != 0) else {
-                break false;
+                break top;
             };
             if skel.bones.iter().any(|b| b.crc == parent) {
                 break true;
             }
-            let name = BF1_RIG_BONES.iter().find(|n| crc32_lower(n) == parent);
+            let name = BF1_RIG_BONES
+                .iter()
+                .chain(&["bone_root"])
+                .find(|n| crc32_lower(n) == parent);
             match name {
-                Some(name) if missing.len() < BF1_RIG_BONES.len() => missing.push(name),
-                _ => break false,
+                Some(name) if missing.len() <= BF1_RIG_BONES.len() => missing.push(name),
+                _ => break top,
             }
             at = parent;
         };
         if anchored {
             for name in missing.iter().rev() {
-                changed |= append_rig_attachment(skel, rig, name)?;
+                changed |= if *name == "bone_root" {
+                    append_rig_root(skel, rig)
+                } else {
+                    append_rig_attachment(skel, rig, name)?
+                };
             }
         }
     }
