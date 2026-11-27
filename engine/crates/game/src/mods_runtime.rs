@@ -132,6 +132,12 @@ fn catalog_entries(maps: &[ModMapSummary], folder: &str, source: &str) -> Vec<Mo
             source: source.to_owned(),
             description: map.description.clone(),
             modes,
+            era_overrides: map.era_overrides.clone().map(|ov| {
+                ov.map(|m| ui::shell::EraOverride {
+                    name: m.name,
+                    icon: m.icon,
+                })
+            }),
             variant_keys: vec![map.map_key.clone()],
         });
     }
@@ -889,6 +895,7 @@ mod tests {
                     unsupported_reason: None,
                 }],
                 sound_planets: Vec::new(),
+                era_overrides: [None, None],
             }],
             dependencies: Vec::new(),
             conflicts: Vec::new(),

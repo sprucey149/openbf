@@ -190,6 +190,7 @@ pub struct AddonInspection {
     pub core_lvl: Option<PathBuf>,
     pub shell_icon_lvls: Vec<PathBuf>,
     pub custom_mode_meta: BTreeMap<String, extensions::mods::ModModeMeta>,
+    pub custom_era_meta: BTreeMap<String, extensions::mods::ModEraMeta>,
     pub mission_lvls: Vec<PathBuf>,
     pub map_titles: BTreeMap<String, (Option<String>, Option<String>)>,
     pub missions: Vec<InspectedMission>,
@@ -221,6 +222,7 @@ pub struct AddonMapGroup<'a> {
     pub modes_cw: Vec<String>,
     pub modes_gcw: Vec<String>,
     pub sound_planets: Vec<String>,
+    pub era_overrides: [Option<extensions::mods::ModEraMeta>; 2],
     pub missions: Vec<AddonPlannedMission<'a>>,
 }
 
@@ -395,6 +397,31 @@ impl AddonInspection {
                 }
                 format!("{title} ({suffix})")
             };
+            let mut era_overrides: [Option<extensions::mods::ModEraMeta>; 2] = [None, None];
+            for m in &list {
+                let slot = if m.era == "cw" { 0 } else { 1 };
+                if era_overrides[slot].is_some() {
+                    continue;
+                }
+                let lower = m.script_name.to_ascii_lowercase();
+                if let Some((prefix, _)) = lower.rsplit_once('_') {
+                    if let Some(ch) = prefix.chars().last() {
+                        let map_key_era = format!("{legacy_stem}:{ch}");
+                        let found = self
+                            .custom_era_meta
+                            .get(&map_key_era)
+                            .or_else(|| {
+                                (!matches!(ch, 'c' | 'g'))
+                                    .then(|| self.custom_era_meta.get(&ch.to_string()))
+                                    .flatten()
+                            })
+                            .cloned();
+                        if found.is_some() {
+                            era_overrides[slot] = found;
+                        }
+                    }
+                }
+            }
             groups.push(AddonMapGroup {
                 map_key,
                 legacy_code: legacy_stem,
@@ -410,6 +437,7 @@ impl AddonInspection {
                 modes_cw: modes_cw_set.into_iter().collect(),
                 modes_gcw: modes_gcw_set.into_iter().collect(),
                 sound_planets: planets_set.into_iter().collect(),
+                era_overrides,
                 missions: planned,
             });
         }
@@ -730,6 +758,15 @@ fn inspect_game_folder(
                 entry.icon = v.icon;
             }
         }
+        for (k, v) in part.custom_era_meta {
+            let entry = out.custom_era_meta.entry(k).or_default();
+            if entry.name.is_none() {
+                entry.name = v.name;
+            }
+            if entry.icon.is_none() {
+                entry.icon = v.icon;
+            }
+        }
         for (id, title) in part.map_titles {
             out.map_titles.entry(id).or_insert(title);
         }
@@ -857,6 +894,7 @@ struct AddmeSummary {
     core_lvl_hint: Option<String>,
     shell_lvl_hints: Vec<String>,
     custom_mode_meta: BTreeMap<String, extensions::mods::ModModeMeta>,
+    custom_era_meta: BTreeMap<String, extensions::mods::ModEraMeta>,
     unsupported: Vec<UnsupportedScriptFeature>,
     warnings: Vec<String>,
 }
@@ -926,7 +964,7 @@ fn parse_addme_script(bytes: &[u8]) -> Result<AddmeSummary, String> {
                         }
                     }
                 }
-                // Extract v1.3-style `change = { mode_<suffix> = { name, about, icon } }` metadata.
+                // Extract v1.3-style `change = { mode_<suffix> = {...}, era_<code > = {...} }` metadata.
                 if let Some(LuaVal::Table(ctid)) = entry.get_str_ci("change") {
                     if let Some(change) = env.table(*ctid) {
                         for (ck, cv) in &change.entries {
@@ -934,38 +972,67 @@ fn parse_addme_script(bytes: &[u8]) -> Result<AddmeSummary, String> {
                                 continue;
                             };
                             let low = ckey.to_ascii_lowercase();
-                            let Some(mode_code) = low.strip_prefix("mode_") else {
-                                continue;
-                            };
                             let Some(mtbl) = env.table(*mtid) else {
                                 continue;
                             };
-                            let meta = summary
-                                .custom_mode_meta
-                                .entry(mode_code.to_owned())
-                                .or_default();
-                            if meta.name.is_none() {
-                                meta.name = mtbl
-                                    .get_str_ci("name")
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.trim().to_owned())
-                                    .filter(|s| !s.is_empty());
-                            }
-                            if meta.description.is_none() {
-                                meta.description = mtbl
-                                    .get_str_ci("about")
-                                    .or_else(|| mtbl.get_str_ci("description"))
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.trim().to_owned())
-                                    .filter(|s| !s.is_empty());
-                            }
-                            if meta.icon.is_none() {
-                                meta.icon = mtbl
-                                    .get_str_ci("icon")
-                                    .or_else(|| mtbl.get_str_ci("icon2"))
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.trim().to_ascii_lowercase())
-                                    .filter(|s| !s.is_empty());
+                            if let Some(mode_code) = low.strip_prefix("mode_") {
+                                let meta = summary
+                                    .custom_mode_meta
+                                    .entry(mode_code.to_owned())
+                                    .or_default();
+                                if meta.name.is_none() {
+                                    meta.name = mtbl
+                                        .get_str_ci("name")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.trim().to_owned())
+                                        .filter(|s| !s.is_empty());
+                                }
+                                if meta.description.is_none() {
+                                    meta.description = mtbl
+                                        .get_str_ci("about")
+                                        .or_else(|| mtbl.get_str_ci("description"))
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.trim().to_owned())
+                                        .filter(|s| !s.is_empty());
+                                }
+                                if meta.icon.is_none() {
+                                    meta.icon = mtbl
+                                        .get_str_ci("icon")
+                                        .or_else(|| mtbl.get_str_ci("icon2"))
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.trim().to_ascii_lowercase())
+                                        .filter(|s| !s.is_empty());
+                                }
+                            } else if let Some(era_code) = low.strip_prefix("era_") {
+                                let key_id = tmpl
+                                    .split("%s")
+                                    .next()
+                                    .unwrap_or("")
+                                    .trim_end_matches('_')
+                                    .to_ascii_lowercase();
+                                let era_key = if key_id.is_empty() {
+                                    era_code.to_owned()
+                                } else {
+                                    format!("{key_id}:{era_code}")
+                                };
+                                for k in [era_key, era_code.to_owned()] {
+                                    let meta = summary.custom_era_meta.entry(k).or_default();
+                                    if meta.name.is_none() {
+                                        meta.name = mtbl
+                                            .get_str_ci("name")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.trim().to_owned())
+                                            .filter(|s| !s.is_empty());
+                                    }
+                                    if meta.icon.is_none() {
+                                        meta.icon = mtbl
+                                            .get_str_ci("icon2")
+                                            .or_else(|| mtbl.get_str_ci("icon"))
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.trim().to_ascii_lowercase())
+                                            .filter(|s| !s.is_empty());
+                                    }
+                                }
                             }
                         }
                     }
@@ -1126,6 +1193,7 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
         core_lvl: None,
         shell_icon_lvls: Vec::new(),
         custom_mode_meta: BTreeMap::new(),
+        custom_era_meta: BTreeMap::new(),
         mission_lvls: Vec::new(),
         map_titles: BTreeMap::new(),
         missions: Vec::new(),
@@ -1272,6 +1340,7 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
         }
     }
     out.custom_mode_meta = addme_summary.custom_mode_meta.clone();
+    out.custom_era_meta = addme_summary.custom_era_meta.clone();
 
     // Choose primary legacy addon ID.
     let mut candidate_ids: Vec<String> = addme_summary.legacy_ids.iter().cloned().collect();

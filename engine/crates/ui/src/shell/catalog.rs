@@ -215,6 +215,14 @@ pub(super) const BF1_MAPS: [(&str, &str, &str, bool, bool); 16] = [
     ),
 ];
 
+/// Optional per-era name and icon override declared by a mod's `addme.script`
+/// (`change.era_<id>`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EraOverride {
+    pub name: Option<String>,
+    pub icon: Option<String>,
+}
+
 /// One map of the merged list.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapEntry {
@@ -235,6 +243,8 @@ pub struct MapEntry {
     /// The modes per era (Clone Wars, Galactic Civil War), from the disc's
     /// tables.
     pub modes: [Vec<Mode>; 2],
+    /// Optional custom era display metadata per era slot (`[Cw, Gcw]`).
+    pub era_overrides: [Option<EraOverride>; 2],
     pub baked: bool,
     /// The faction pairs of the port's mission files, per mode.
     pub missions: Vec<(Mode, [String; 2])>,
@@ -250,6 +260,8 @@ pub struct ModMapEntry {
     pub disambiguator: String,
     pub description: String,
     pub modes: [Vec<Mode>; 2],
+    /// Optional custom era display metadata per era slot (`[Cw, Gcw]`).
+    pub era_overrides: [Option<EraOverride>; 2],
     /// The display name of the mod that adds the map.
     pub source: String,
 }
@@ -382,6 +394,7 @@ pub fn catalog_with_mods(
             code,
             description: desc,
             modes,
+            era_overrides: [None, None],
             baked: baked.is_some(),
             missions,
         }
@@ -485,6 +498,7 @@ pub fn catalog_with_mods(
             source: m.source.clone(),
             description: m.description.clone(),
             modes: m.modes.clone(),
+            era_overrides: m.era_overrides.clone(),
             baked: is_baked,
             missions,
         });

@@ -158,6 +158,7 @@ pub fn quick_inspect_mod_folder(
                 })
                 .collect(),
             sound_planets: g.sound_planets.clone(),
+            era_overrides: g.era_overrides.clone(),
         })
         .collect();
 
@@ -360,6 +361,7 @@ pub fn inspect_mod_folder(
                 })
                 .collect(),
             sound_planets: g.sound_planets.clone(),
+            era_overrides: g.era_overrides.clone(),
         })
         .collect();
 

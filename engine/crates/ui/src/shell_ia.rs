@@ -612,7 +612,7 @@ impl Ctx<'_> {
                 let m = row_h * (1.0 - CURSOR_H) * 0.5;
                 self.cursor_box(s, [x0, y + m, x1, y + row_h - m]);
             }
-            let icons = match (row.icon.as_deref(), row.icon2) {
+            let icons = match (row.icon.as_deref(), row.icon2.as_deref()) {
                 (Some(_), Some(_)) => ICON_IN + 2.0 * icon + ICON_GAP,
                 (Some(_), None) => ICON_IN + icon,
                 _ => 0.0,
@@ -644,7 +644,7 @@ impl Ctx<'_> {
                     tex,
                     half,
                 );
-                if let Some(tex2) = row.icon2 {
+                if let Some(tex2) = row.icon2.as_deref() {
                     // The playlist's era icon: grey 128 (f3 pc 64-89).
                     let ex = ix - ICON_GAP - icon;
                     let grey = ([128.0; 3], style.1);
@@ -1275,6 +1275,7 @@ pub(crate) mod tests {
                 source: String::new(),
                 description: String::new(),
                 modes: [vec![Mode::Con], Vec::new()],
+                era_overrides: [None, None],
                 baked: true,
                 missions: vec![(Mode::Con, ["rep".into(), "cis".into()])],
             })
@@ -1373,6 +1374,7 @@ pub(crate) mod tests {
             source: String::new(),
             description: String::new(),
             modes: [vec![Mode::Con], Vec::new()],
+            era_overrides: [None, None],
             baked: true,
             missions: vec![(Mode::Con, ["rep".into(), "cis".into()])],
         };
@@ -1481,6 +1483,7 @@ pub(crate) mod tests {
             source: String::new(),
             description: String::new(),
             modes: [vec![Mode::Con], Vec::new()],
+            era_overrides: [None, None],
             baked,
             missions: vec![(Mode::Con, ["rep".into(), "cis".into()])],
         };

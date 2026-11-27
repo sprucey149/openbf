@@ -209,6 +209,18 @@ pub struct ModMapSummary {
     pub missions: Vec<ModMissionSummary>,
     #[serde(default)]
     pub sound_planets: Vec<String>,
+    /// Optional custom era display overrides (`[cw, gcw]`) from `addme.script` `change.era_*`.
+    #[serde(default)]
+    pub era_overrides: [Option<ModEraMeta>; 2],
+}
+
+/// Optional display metadata for a mod-declared era (from `addme.script` `change.era_*`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModEraMeta {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -791,6 +803,7 @@ mod tests {
             modes_gcw: Vec::new(),
             missions: Vec::new(),
             sound_planets: Vec::new(),
+            era_overrides: [None, None],
         };
         let meta = empty_meta(vec![map], "");
         let choices = BTreeMap::new();

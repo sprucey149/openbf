@@ -221,6 +221,7 @@ fn grouped_maps_open_by_source_folder() {
         disambiguator: source.into(),
         description: String::new(),
         modes: [vec![Mode::Con], vec![Mode::Con]],
+        era_overrides: [None, None],
         source: source.into(),
     };
     let mod_maps = [
@@ -412,7 +413,7 @@ fn the_states_and_their_presses() {
     assert_eq!(m.playlist.len(), 1);
     assert_eq!(m.play_rows()[1].text, "Hoth (bf2)");
     assert_eq!(m.play_rows()[1].icon.as_deref(), Some("mode_icon_con"));
-    assert_eq!(m.play_rows()[1].icon2, Some("imp_icon"));
+    assert_eq!(m.play_rows()[1].icon2.as_deref(), Some("imp_icon"));
     // REMOVE -> the playlist on "Remove All" (info empty), Down, Cross
     // deletes Hoth; with only Remove All left the focus is ADD.
     m.step(down(), 0.0);
@@ -1362,6 +1363,7 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
             source: "Abregado".into(),
             description: "Swamp canal city".into(),
             modes: [vec![Mode::Con, Mode::Ctf], vec![Mode::Con, Mode::Ctf]],
+            era_overrides: [None, None],
         },
         ModMapEntry {
             key: "mod_abr_v2__abr".into(),
@@ -1372,6 +1374,7 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
             source: "Abregado".into(),
             description: "Remaster".into(),
             modes: [vec![Mode::Ctf], vec![Mode::Ctf]],
+            era_overrides: [None, None],
         },
     ];
     let bakes = vec![
@@ -1396,4 +1399,46 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
     assert!(abr1.runnable(&Mode::Ctf, Side::Era(Era::Gcw)));
     assert!(abr1.runnable(&Mode::Ctf, Side::Era(Era::Cw)));
     assert!(abr1.runnable(&Mode::Con, Side::Mixed(0)));
+}
+
+#[test]
+fn custom_era_override_replaces_name_and_icon() {
+    let mod_maps = vec![ModMapEntry {
+        key: "mod_rs__st7".into(),
+        variant_keys: vec!["mod_rs__st7".into()],
+        legacy_code: "st7".into(),
+        name: "Balmorra: Outpost".into(),
+        disambiguator: "RS".into(),
+        source: "Rising Son".into(),
+        description: "Imperial outpost".into(),
+        modes: [Vec::new(), vec![Mode::Con]],
+        era_overrides: [
+            None,
+            Some(EraOverride {
+                name: Some("Dark Times".into()),
+                icon: Some("darktimes_icon".into()),
+            }),
+        ],
+    }];
+    let bakes = vec![("mod_rs__st7".to_owned(), "bf2".to_owned())];
+    let missions = |_: &str, mode: Mode| match mode {
+        Mode::Con => vec![["all".to_owned(), "imp".to_owned()]],
+        _ => Vec::new(),
+    };
+    let mut ia = InstantAction::new(
+        catalog_with_mods(&text, &bakes, &missions, &mod_maps),
+        IaTexts::new(&|_, e| e.to_owned()),
+        SessionOptions::default(),
+    );
+    let idx = ia.maps.iter().position(|m| m.key == "mod_rs__st7").unwrap();
+    ia.picked_map = MapPick::One(idx);
+    ia.picked_mode = ModePick::One(Mode::Con);
+    ia.state = State::Era;
+    let rows = ia.side_rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].text, "Dark Times");
+    assert_eq!(rows[0].icon.as_deref(), Some("darktimes_icon"));
+    assert_eq!(ia.info(), "Dark Times");
+    ia.step(cross(), 0.0);
+    assert_eq!(ia.play_rows()[1].icon2.as_deref(), Some("darktimes_icon"));
 }

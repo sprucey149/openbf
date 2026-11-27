@@ -457,7 +457,7 @@ pub struct ListRow {
     /// The right-edge icon (a mode's, an era's) and the one left of it (a
     /// playlist row's era icon).
     pub icon: Option<String>,
-    pub icon2: Option<&'static str>,
+    pub icon2: Option<String>,
 }
 
 /// The page up.
@@ -907,6 +907,23 @@ impl InstantAction {
             .collect()
     }
 
+    fn era_display(&self, map: MapPick, e: Era) -> (String, String) {
+        if let MapPick::One(i) = map {
+            if let Some(ov) = &self.maps[i].era_overrides[e.index()] {
+                let name = ov
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| self.texts.era(e).to_owned());
+                let icon = ov
+                    .icon
+                    .clone()
+                    .unwrap_or_else(|| e.icon().to_owned());
+                return (name, icon);
+            }
+        }
+        (self.texts.era(e).to_owned(), e.icon().to_owned())
+    }
+
     pub fn side_rows(&self) -> Vec<ListRow> {
         let picks = self.side_picks();
         let live = |p: SidePick| self.adds(self.picked_map, self.picked_mode.clone(), p);
@@ -917,15 +934,21 @@ impl InstantAction {
         picks
             .iter()
             .map(|&p| match p {
-                SidePick::One(s) => ListRow {
-                    text: self.texts.side(s),
-                    enabled: live(p),
-                    icon: match s {
-                        Side::Era(e) => Some(e.icon().to_owned()),
-                        Side::Mixed(_) => None,
-                    },
-                    icon2: None,
-                },
+                SidePick::One(s) => {
+                    let (text, icon) = match s {
+                        Side::Era(e) => {
+                            let (n, ic) = self.era_display(self.picked_map, e);
+                            (n, Some(ic))
+                        }
+                        Side::Mixed(_) => (self.texts.side(s), None),
+                    };
+                    ListRow {
+                        text,
+                        enabled: live(p),
+                        icon,
+                        icon2: None,
+                    }
+                }
                 // `[ours]` like All Modes: dimmed with one live era.
                 SidePick::AllEras => ListRow {
                     text: self.texts.all_eras.clone(),
@@ -955,7 +978,7 @@ impl InstantAction {
             enabled: true,
             icon: Some(self.texts.mode_icon(&e.mode)),
             icon2: match e.side {
-                Side::Era(era) => Some(era.icon()),
+                Side::Era(era) => Some(self.era_display(MapPick::One(e.map), era).1),
                 Side::Mixed(_) => None,
             },
         }))
@@ -1033,6 +1056,7 @@ impl InstantAction {
                 _ => self.texts.all_modes_desc.clone(),
             },
             State::Era => match self.side_picks().get(at(&self.era_list)) {
+                Some(SidePick::One(Side::Era(e))) => self.era_display(self.picked_map, *e).0,
                 Some(SidePick::One(s)) => self.texts.side(*s),
                 _ => self.texts.all_eras.clone(),
             },

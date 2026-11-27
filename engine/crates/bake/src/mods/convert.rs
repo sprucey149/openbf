@@ -362,6 +362,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             modes_gcw: g.modes_gcw.clone(),
             missions: planned_missions,
             sound_planets: g.sound_planets.clone(),
+            era_overrides: g.era_overrides.clone(),
         });
     }
 
