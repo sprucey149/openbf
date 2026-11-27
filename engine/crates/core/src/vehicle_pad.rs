@@ -83,12 +83,19 @@ pub struct PadDef {
     pub spawn_count: u32,
     /// The class per port team (PS2 teams 1, 2).
     pub classes: [Option<PadClass>; 2],
+    /// The PS2's team 0 class (`ClassNeutral`; B2 FUN_00371990 stores a
+    /// class per team 0..7, FUN_00373138 spawns the current team's): what a
+    /// pad spawns while no team owns it.
+    pub neutral: Option<PadClass>,
 }
 
 impl PadDef {
     /// The class the pad spawns for `team`, if any.
     pub fn class_for(&self, team: Option<u8>) -> Option<&PadClass> {
-        self.classes.get(usize::from(team?))?.as_ref()
+        match team {
+            Some(t) => self.classes.get(usize::from(t))?.as_ref(),
+            None => self.neutral.as_ref(),
+        }
     }
 
     /// The class identity the decay compares (`class[f8] != class[fc]`).

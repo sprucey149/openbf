@@ -7,7 +7,7 @@ use game::walk::WalkSim;
 #[derive(Clone, Copy)]
 enum Candidate {
     Live(VehicleHandle),
-    Pad(usize, u8),
+    Pad(usize, Option<u8>),
 }
 
 pub(super) fn seat_player_in_vehicle(walk: &mut WalkSim, query: &str) -> Result<()> {
@@ -43,17 +43,13 @@ pub(super) fn seat_player_in_vehicle(walk: &mut WalkSim, query: &str) -> Result<
             .def
             .cp
             .map_or(pad.team, |ci| walk.sim.cps.get(ci).and_then(|c| c.owner));
-        for team in 0..2u8 {
-            let Some(class) = pad
-                .def
-                .class_for(Some(team))
-                .filter(|c| !c.spec.seats.is_empty())
-            else {
+        for team in [Some(0), Some(1), None] {
+            let Some(class) = pad.def.class_for(team).filter(|c| !c.spec.seats.is_empty()) else {
                 continue;
             };
             if let Some((name, exact)) = match_name(class.spec.class) {
                 candidates.push((
-                    (exact, team == player_team, owner == Some(team), false),
+                    (exact, team == Some(player_team), owner == team, false),
                     Candidate::Pad(pi, team),
                     name,
                 ));
@@ -69,7 +65,7 @@ pub(super) fn seat_player_in_vehicle(walk: &mut WalkSim, query: &str) -> Result<
             Candidate::Live(h) => (h, None),
             Candidate::Pad(pi, team) => {
                 let before = walk.sim.vehicle_pads[pi].clone();
-                let Some(h) = walk.sim.spawn_from_pad(pi, Some(team)) else {
+                let Some(h) = walk.sim.spawn_from_pad(pi, team) else {
                     continue;
                 };
                 (h, Some((pi, before)))
@@ -88,12 +84,14 @@ pub(super) fn seat_player_in_vehicle(walk: &mut WalkSim, query: &str) -> Result<
         .sim
         .alive_vehicles()
         .map(|(_, v)| v.class)
-        .chain(
-            walk.sim
-                .vehicle_pads
+        .chain(walk.sim.vehicle_pads.iter().flat_map(|p| {
+            p.def
+                .classes
                 .iter()
-                .flat_map(|p| p.def.classes.iter().flatten().map(|c| c.spec.class)),
-        )
+                .chain([&p.def.neutral])
+                .flatten()
+                .map(|c| c.spec.class)
+        }))
         .filter_map(|c| walk.vehicle_classes.get(c as usize))
         .collect();
     available.sort_unstable();
@@ -158,6 +156,7 @@ mod tests {
             decay_time: 10.0,
             spawn_count: 1,
             classes: [class(1), class(0)],
+            neutral: None,
         }
     }
 

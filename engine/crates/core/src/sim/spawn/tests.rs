@@ -525,6 +525,7 @@ fn command_walker_sim(pad_pos: Vec3, pad_yaw: f32) -> Sim {
             }),
             None,
         ],
+        neutral: None,
     });
     s
 }
