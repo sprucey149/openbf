@@ -131,6 +131,71 @@ pub fn terrain_grid_size(positions: &[[f32; 3]]) -> Option<usize> {
     (n >= 2 && n * n <= positions.len()).then_some(n)
 }
 
+/// Read only the `map` and `source_game` header fields of a `manifest.ron`.
+/// Baked manifests can exceed 1 MB; reading the leading bytes avoids pulling
+/// the full file from disk and parsing thousands of instances during shell
+/// map discovery. Falls back to full RON deserialization if the header is not
+/// in the leading chunk.
+pub(crate) fn read_manifest_head(path: &Path) -> Option<ManifestHead> {
+    use std::io::Read;
+    if let Ok(r) = pak::open(path) {
+        let mut buf = Vec::with_capacity(1024);
+        if r.take(1024).read_to_end(&mut buf).is_ok() {
+            if let Ok(head) = std::str::from_utf8(&buf) {
+                if let Some(parsed) = parse_manifest_head_fast(head) {
+                    return Some(parsed);
+                }
+            }
+        }
+    }
+    let txt = pak::read_to_string(path).ok()?;
+    ron::from_str::<ManifestHead>(&txt).ok()
+}
+
+fn parse_manifest_head_fast(head: &str) -> Option<ManifestHead> {
+    let mut map: Option<String> = None;
+    let mut source_game: Option<String> = None;
+    for line in head.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("map:") {
+            if map.is_none() {
+                map = parse_simple_ron_string(rest);
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("source_game:") {
+            if source_game.is_none() {
+                source_game = parse_simple_ron_string(rest);
+            }
+        }
+        if map.is_some() && source_game.is_some() {
+            return Some(ManifestHead {
+                map: map?,
+                source_game: source_game?,
+            });
+        }
+        // Stop before entering nested arrays/structs where `map:` could mean something else.
+        if trimmed.contains('[') {
+            break;
+        }
+    }
+    None
+}
+
+fn parse_simple_ron_string(s: &str) -> Option<String> {
+    let s = s.trim();
+    let rest = s.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    let inner = &rest[..end];
+    if inner.contains('\\') {
+        return None;
+    }
+    let after = rest[end + 1..].trim();
+    if after.is_empty() || after == "," || after.starts_with(',') {
+        Some(inner.to_owned())
+    } else {
+        None
+    }
+}
+
 /// Every baked map under `assets_dir`: (map KEY = directory name, source
 /// game, directory). The key is the directory, not the world name inside the
 /// LVL — both discs ship worlds called hoth/yavin1/kas2/naboo2/geo1/end1.
@@ -141,20 +206,18 @@ pub fn discover_maps(assets_dir: &Path) -> Vec<(String, String, std::path::PathB
     };
     for dir in rd {
         let m = dir.join("manifest.ron");
-        if let Ok(txt) = pak::read_to_string(&m) {
-            if let Ok(h) = ron::from_str::<ManifestHead>(&txt) {
-                // Key by DIRECTORY name, not the world name inside the LVL:
-                // BF1 and BF2 both ship worlds called "hoth", "yavin1",
-                // "kas2", "naboo2", "geo1", "end1" and "kamino1", so the
-                // manifest name is not unique and cannot address a mission
-                // file. The bake names directories <game>_<lvl> (bf1_hot1).
-                let key = dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(&h.map)
-                    .to_owned();
-                out.push((key, h.source_game, dir));
-            }
+        if let Some(h) = read_manifest_head(&m) {
+            // Key by DIRECTORY name, not the world name inside the LVL:
+            // BF1 and BF2 both ship worlds called "hoth", "yavin1",
+            // "kas2", "naboo2", "geo1", "end1" and "kamino1", so the
+            // manifest name is not unique and cannot address a mission
+            // file. The bake names directories <game>_<lvl> (bf1_hot1).
+            let key = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&h.map)
+                .to_owned();
+            out.push((key, h.source_game, dir));
         }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));

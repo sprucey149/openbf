@@ -578,6 +578,59 @@ pub fn scene_kills(dir: &Path, map: &str, mode: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[derive(Deserialize)]
+struct TeamFactionOnly {
+    faction: String,
+    #[serde(default)]
+    tickets: u32,
+}
+
+#[derive(Deserialize)]
+struct MissionFactionsOnly {
+    teams: Vec<TeamFactionOnly>,
+    #[serde(default)]
+    campaign: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    script: Option<serde::de::IgnoredAny>,
+}
+
+/// Fast path for shell catalog discovery: read only the two team faction names
+/// without deserializing `script` trees or loading `script_libs`/`campaign/lib`.
+fn load_factions_fast(path: &Path) -> Result<[String; 2]> {
+    use std::io::Read;
+    if let Ok(r) = pak::open(path) {
+        let mut buf = Vec::with_capacity(16 * 1024);
+        if r.take(16 * 1024).read_to_end(&mut buf).is_ok() {
+            if let Ok(head) = std::str::from_utf8(&buf) {
+                if let Some(start) = head.find("\n    teams: [") {
+                    let after_key = &head[start + "\n    teams: ".len()..];
+                    if let Some(end) = after_key.find("\n    ],") {
+                        let slice = &after_key[..end + "\n    ]".len()];
+                        if let Ok(teams) = ron::from_str::<Vec<TeamFactionOnly>>(slice) {
+                            if teams.len() == 2 && teams.iter().all(|t| t.tickets > 0) {
+                                return Ok([teams[0].faction.clone(), teams[1].faction.clone()]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let txt = pak::read_to_string(path).with_context(|| path.display().to_string())?;
+    let m: MissionFactionsOnly = ron::Options::default()
+        .without_recursion_limit()
+        .from_str(&txt)
+        .with_context(|| format!("parse {}", path.display()))?;
+    if m.teams.len() != 2 {
+        anyhow::bail!("{}: v0 missions need exactly two teams", path.display());
+    }
+    let has_script = m.campaign.is_some() || m.script.is_some();
+    if !has_script && m.teams.iter().any(|t| t.tickets == 0) {
+        anyhow::bail!("{}: team has 0 reinforcements", path.display());
+    }
+    Ok([m.teams[0].faction.clone(), m.teams[1].faction.clone()])
+}
+
 /// The faction pairs of `map`'s mission files for `mode` in `dir` (each era
 /// suffix); the Instant Action screen's runnable check (`ui::shell`).
 pub fn pairs(dir: &Path, map: &str, mode: &str) -> Vec<[String; 2]> {
@@ -585,8 +638,28 @@ pub fn pairs(dir: &Path, map: &str, mode: &str) -> Vec<[String; 2]> {
         .iter()
         .map(|s| dir.join(format!("{map}_{mode}{s}.ron")))
         .filter(|p| pak::is_file(p))
-        .filter_map(|p| MissionDef::load(&p).ok())
-        .map(|m| m.factions())
+        .filter_map(|p| load_factions_fast(&p).ok())
+        .collect()
+}
+
+/// Like [`pairs`], but checks `existing` (a pre-scanned set of filenames in
+/// `dir`) to avoid per-file stat/overlay probes when building the Instant
+/// Action catalog across many maps and mods.
+pub fn pairs_with_index(
+    dir: &Path,
+    existing: &std::collections::HashSet<String>,
+    map: &str,
+    mode: &str,
+) -> Vec<[String; 2]> {
+    ERA_SUFFIXES
+        .iter()
+        .filter_map(|s| {
+            let name = format!("{map}_{mode}{s}.ron");
+            existing
+                .contains(&name.to_ascii_lowercase())
+                .then(|| dir.join(name))
+        })
+        .filter_map(|p| load_factions_fast(&p).ok())
         .collect()
 }
 
@@ -1755,13 +1828,53 @@ mod tests {
         assert_eq!(c2.flags[0].geometry.as_deref(), Some("imp_icon_flag"));
         assert!(two_flag.is_ctf());
     }
+
+    #[test]
+    fn load_factions_fast_reads_pretty_and_compact_missions_without_libs() {
+        let dir = std::env::temp_dir().join(format!("openbf_mission_fast_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pretty = dir.join("m1_con.ron");
+        std::fs::write(
+            &pretty,
+            "(\n    map: \"m1\",\n    mode: \"con\",\n    source_game: \"bf2\",\n    teams: [\n        (\n            faction: \"all\",\n            units: 32,\n            tickets: 150,\n        ),\n        (\n            faction: \"imp\",\n            units: 32,\n            tickets: 150,\n        ),\n    ],\n    script: Some((functions: [])),\n)\n",
+        )
+        .unwrap();
+        assert_eq!(load_factions_fast(&pretty).unwrap(), ["all", "imp"]);
+
+        let compact = dir.join("m2_con.ron");
+        std::fs::write(
+            &compact,
+            "(map:\"m2\",mode:\"con\",source_game:\"bf2\",teams:[(faction:\"rep\",units:32,tickets:0),(faction:\"cis\",units:32,tickets:0)],script:Some((functions:[])))",
+        )
+        .unwrap();
+        assert_eq!(load_factions_fast(&compact).unwrap(), ["rep", "cis"]);
+
+        let zero_no_script = dir.join("m3_con.ron");
+        std::fs::write(
+            &zero_no_script,
+            "(map:\"m3\",mode:\"con\",source_game:\"bf2\",teams:[(faction:\"rep\",units:32,tickets:0),(faction:\"cis\",units:32,tickets:150)])",
+        )
+        .unwrap();
+        assert!(load_factions_fast(&zero_no_script).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// The shared campaign scripts (`engine/missions/campaign/lib/*.ron`),
-/// sorted by name so every load lists them alike.
+/// sorted by name so every load lists them alike. Cached by directory so
+/// repeated mission loads do not re-parse every stock library RON.
 fn load_campaign_libs(
     dir: &Path,
 ) -> Result<Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type LibList = Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>;
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, LibList>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(dir) {
+        return Ok(hit.clone());
+    }
     let mut out = Vec::new();
     for path in pak::read_dir(dir).unwrap_or_default() {
         if path.extension().and_then(|e| e.to_str()) != Some("ron") {
@@ -1776,5 +1889,11 @@ fn load_campaign_libs(
         out.push((stem.to_ascii_lowercase(), std::sync::Arc::new(def)));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
+    if !out.is_empty() {
+        cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(dir.to_path_buf(), out.clone());
+    }
     Ok(out)
 }

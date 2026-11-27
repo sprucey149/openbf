@@ -72,10 +72,21 @@ fn catalog_action(
         .into_iter()
         .map(|(k, g, _)| (k, g))
         .collect();
+    let mission_files: std::collections::HashSet<String> = pak::read_dir(missions_dir)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_ascii_lowercase)
+        })
+        .collect();
     let missions = |key: &str, mode: Mode| match mode {
-        Mode::Xl if single_player => crate::mission::pairs(missions_dir, key, Mode::Con.subst()),
+        Mode::Xl if single_player => {
+            crate::mission::pairs_with_index(missions_dir, &mission_files, key, Mode::Con.subst())
+        }
         Mode::Xl => Vec::new(),
-        _ => crate::mission::pairs(missions_dir, key, mode.subst()),
+        _ => crate::mission::pairs_with_index(missions_dir, &mission_files, key, mode.subst()),
     };
     let maps = ui::shell::catalog_with_mods(
         &text,
