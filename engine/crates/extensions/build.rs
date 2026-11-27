@@ -1,6 +1,8 @@
 //! `MOD_CONVERTER_ID`: a hash of every source file `bake mod-convert` is
 //! built from, so a mod cache written by any other converter reads as stale
-//! with no number to bump by hand.
+//! with no number to bump by hand. `MOD_ASSET_ID`: the same without the
+//! mission and menu logic ([`LOGIC`]), so a change there keeps the baked
+//! assets of the stale cache (`bake::mods::assets`).
 
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -14,6 +16,21 @@ const CONVERTER: &[(&str, &[&str])] = &[
     ("mungefs", &["src"]),
     ("manifest", &["src", "data"]),
     ("pak", &["src"]),
+];
+
+/// The converter's mission and menu logic, below `crates/`: it chooses what
+/// to bake and writes the missions and cache metadata, but makes no byte of a
+/// baked asset (`bake/tests/asset_code.rs` checks that no asset code calls
+/// it). What it chooses is part of each asset step's key.
+const LOGIC: &[&str] = &[
+    "bake/src/mods/convert.rs",
+    "bake/src/mods/mission.rs",
+    "extensions/src/mods.rs",
+    "mungefs/src/addon.rs",
+    "mungefs/src/addon/",
+    "mungefs/src/lua50.rs",
+    "mungefs/src/lua50/",
+    "mungefs/src/modscan.rs",
 ];
 
 fn files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -39,6 +56,7 @@ fn main() {
         .expect("crates dir")
         .to_path_buf();
     let mut h = Sha256::new();
+    let mut assets = Sha256::new();
     for (krate, dirs) in CONVERTER {
         let root = crates.join(krate);
         let mut list = vec![root.join("Cargo.toml")];
@@ -65,13 +83,24 @@ fn main() {
                 continue;
             };
             let text: Vec<u8> = bytes.into_iter().filter(|&b| b != b'\r').collect();
-            h.update(r.as_bytes());
-            h.update([0]);
-            h.update((text.len() as u64).to_le_bytes());
-            h.update(&text);
+            let logic = LOGIC.iter().any(|l| {
+                if l.ends_with('/') {
+                    r.starts_with(l)
+                } else {
+                    r == *l
+                }
+            });
+            for h in std::iter::once(&mut h).chain((!logic).then_some(&mut assets)) {
+                h.update(r.as_bytes());
+                h.update([0]);
+                h.update((text.len() as u64).to_le_bytes());
+                h.update(&text);
+            }
         }
     }
-    let id: String = h.finalize()[..8].iter().map(|b| format!("{b:02x}")).collect();
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    std::fs::write(out.join("converter_id"), id).expect("write converter_id");
+    for (name, h) in [("converter_id", h), ("asset_id", assets)] {
+        let id: String = h.finalize()[..8].iter().map(|b| format!("{b:02x}")).collect();
+        std::fs::write(out.join(name), id).expect("write the id");
+    }
 }

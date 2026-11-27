@@ -137,6 +137,14 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
   - Presence and path-safety checks on every expected `manifest.ron`, mission RON, `locl/english.ron`, and non-removed `replacement_outputs` file on disk.
 - Safe to delete `openbf_data/mod_cache/` at any time; enabled mods regenerate automatically.
 
+### Reusing a stale cache's assets (`bake::mods::assets`)
+
+- A conversion has three kinds of **asset step**: one per map (`assets/<map_key>/`: world, load screen, sounds), one for all the maps' own units (`levels/`: side units, vehicles, effects) and one for the stock replacements (`overrides/`). `asset_steps.ron`, at the cache root, records each step's key, folder, file count and byte total, and what the step reported.
+- A step's key hashes `MOD_ASSET_ID`, the mod's id and source fingerprint, the stock archive's path, length and write time, the catalog digest, the stock game copies, the player's target choices, and what the step is asked to make. A reconversion keeps a step whose key matches and whose folder still holds the recorded files and bytes. Everything else (missions, localization, shell icons, `cache_meta.ron`) is made anew each time, in seconds.
+- `MOD_ASSET_ID` is `MOD_CONVERTER_ID` without the mission and menu logic (`LOGIC` in `engine/crates/extensions/build.rs`). So an update to that logic keeps every asset, while an update to any other converter source rebuilds all of them: the asset modules call one another too freely to be told apart safely.
+- Kept folders move from the old cache into the staging directory just before the swap, and move back if the swap fails.
+- No reuse when the stock assets are a loose directory, whose files may change at any time. OURS: a stock game copy is taken to stay as it is while its path does.
+
 ### Launcher & Scanner Acceleration Caches (`openbf_data/cache/`)
 
 - `file_hashes.ron` (`extensions::mods::FileHashCache`): caches per-file SHA-256 keyed by `(path, len, mtime_ns)`.
@@ -161,7 +169,8 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 ## 8. Extending the System (Developers & Coding Agents)
 
 - **Preserve crate boundaries:** Never add `mungefs` as a normal dependency of `game` or `extensions`. Keep runtime loading strictly over `extensions` + `manifest` + `pak`.
-- **No converter version to bump:** `MOD_CONVERTER_ID` is a hash of every non-test source file in the crates `bake` links (`bake`, `audio`, `extensions`, `mungefs`, `manifest` with its `data/`, `pak`), computed at build time by `engine/crates/extensions/build.rs`. Any change to the converter makes existing caches read as stale and rebuild; the launcher and game pick the `bake` binary whose `bake mod-converter-id` matches their own.
+- **No converter version to bump:** `MOD_CONVERTER_ID` is a hash of every non-test source file in the crates `bake` links (`bake`, `audio`, `extensions`, `mungefs`, `manifest` with its `data/`, `pak`), computed at build time by `engine/crates/extensions/build.rs`. Any change to the converter makes existing caches read as stale and rebuild (keeping their assets when only the mission and menu logic changed, §6); the launcher and game pick the `bake` binary whose `bake mod-converter-id` matches their own.
+- **Asset code stays out of the mission logic:** a file in `LOGIC` is left out of `MOD_ASSET_ID`, so it must write nothing below a step's folder, and code outside the list must not call into it (`engine/crates/bake/tests/asset_code.rs` checks the calls). An asset step's input that the logic chooses belongs in the step's settings, which are part of its key.
 - **Adding a new stock replacement target kind:**
   1. Ensure stock catalog generation (`bake::stock`, `scripts/rebake.sh catalog`, `launcher::pipeline::rebake::bake_stock_catalog`) indexes the target LVL and its outputs.
   2. Add classification and conversion in `bake/src/mods/replace.rs`, emitting `ReplacementOutput` entries (including `removed: true` for removed companions in `Full` mode) and honest `unsupported` diagnostics for unhandled chunks.

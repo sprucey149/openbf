@@ -29,6 +29,9 @@ pub use resolve::{
 /// `bake` is built from (`build.rs`), so a cache from any other converter
 /// reads as stale on its own. [`ModCacheMeta::converter`].
 pub const MOD_CONVERTER_ID: &str = include_str!(concat!(env!("OUT_DIR"), "/converter_id"));
+/// [`MOD_CONVERTER_ID`] without the mission and menu logic: while it holds,
+/// a new converter keeps a stale cache's baked assets (`bake::mods::assets`).
+pub const MOD_ASSET_ID: &str = include_str!(concat!(env!("OUT_DIR"), "/asset_id"));
 pub const MOD_CACHE_SCHEMA_VERSION: u32 = 1;
 
 /// The `bake` subcommand that prints the [`MOD_CONVERTER_ID`] it writes.

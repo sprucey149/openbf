@@ -40,7 +40,7 @@ use super::ModEnv;
 use crate::stock::StockAssets;
 
 /// What the replacements wrote.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Replaced {
     pub outputs: Vec<ReplacementOutput>,
     pub unsupported: Vec<String>,

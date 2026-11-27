@@ -11,9 +11,10 @@ use extensions::mods::catalog::{SourceGame, SourcePlatform};
 use mungefs::addon::{read_core_locl, stock_world_rel, AddonWorldLoad};
 
 use super::addon_sides::{convert_addon_sides, LevelSides};
+use super::assets::{bake_map_assets, units_settings, MapJob, MapShared, Reuse};
 use super::mission::mission_to_ron;
+use super::replace::Replaced;
 use super::{inspect_mod_folder, ModEnv};
-use super::world::{link_tree, read_world, SharedWorldFiles};
 
 pub struct ConvertOptions<'a> {
     pub mod_dir: &'a Path,
@@ -119,8 +120,8 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     let mut maps_baked = 0usize;
     let mut first_failed_map = None;
     let mut missions_written = 0usize;
-    let mut shared_world_files = SharedWorldFiles::default();
-    let mut sound_bakes: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
+    let mut shared = MapShared::default();
+    let mut reuse = Reuse::open(opts.cache_dir, &discovered, opts.env);
     let mut mission_scripts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for ml_path in &insp.mission_lvls {
         if let Ok(bytes) = std::fs::read(ml_path) {
@@ -141,11 +142,6 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     let total_steps = groups.len().max(1);
     for (gi, g) in groups.iter().enumerate() {
         let base_pct = 15 + ((gi * 65) / total_steps) as u8;
-        progress(
-            opts.emit_progress,
-            base_pct,
-            &format!("Converting map `{}`...", g.display_name),
-        );
 
         // Nothing can be played on it, and its world must not fail the mod.
         if !g.missions.iter().any(|m| m.mission.supported) {
@@ -180,91 +176,63 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             };
 
         let map_out = staging.join("assets").join(&g.map_key);
-        std::fs::create_dir_all(&map_out)?;
-        crate::gameplay::exempt_addon(&map_lvl);
-        let map_lvl_str = map_lvl.to_string_lossy();
-        let map_out_str = map_out.to_string_lossy();
-
-        let baked = if world_loads.is_empty() {
-            crate::map::bake_map(&map_lvl_str, &map_out_str, None)
-                .with_context(|| format!("baking map LVL {}", map_lvl.display()))
-        } else {
-            read_world(&world_loads, &map_lvl)
-                .with_context(|| format!("reading the archive selection for {}", g.display_name))
-                .and_then(|world| {
-                    crate::map::bake_addon_map(
-                        &map_lvl_str,
-                        &map_out_str,
-                        crate::map::AddonMapInput {
-                            bytes: &world.bytes,
-                            selectors: &world.selectors,
-                        },
-                    )
-                    .with_context(|| format!("baking selected world {}", g.display_name))
-                })
+        let job = MapJob {
+            map_key: &g.map_key,
+            map_lvl: &map_lvl,
+            world_loads: &world_loads,
+            shares_files: !g.world_loads.is_empty(),
+            loadscreen: g.loadscreen_lvl_path.as_deref(),
+            sounds: &g.custom_sound_lvls,
+            core: insp.core_lvl.as_deref(),
         };
-        // One map that cannot be built leaves the others playable.
-        if let Err(e) = baked {
-            std::fs::remove_dir_all(&map_out)?;
-            warnings.push(format!(
-                "Map `{}` could not be converted ({e:#}).",
-                g.display_name
-            ));
-            first_failed_map.get_or_insert(e);
-            continue;
-        }
-        maps_baked += 1;
-
-        if let Some(load_lvl) = &g.loadscreen_lvl_path {
+        // The LVLs read as the mod's own, whether or not they are baked now.
+        crate::gameplay::exempt_addon(&map_lvl);
+        if let Some(load_lvl) = job.loadscreen {
             crate::gameplay::exempt_addon(load_lvl);
-            if let Err(e) =
-                crate::loadscreen::bake_loadscreen(&load_lvl.to_string_lossy(), &map_out_str)
-            {
-                warnings.push(format!(
-                    "Load screen `{}` could not be converted ({e:#}); using fallback backdrop.",
-                    load_lvl.display()
-                ));
+        }
+        // A stock world may be a copy in this run's own scratch folder, so
+        // that folder's name is left out of the key.
+        let scratch_name = format!("{:?}", stock_scratch.to_string_lossy());
+        let settings = format!("{job:?}").replace(scratch_name.trim_matches('"'), "");
+        let key = reuse.key(&settings);
+        let step = format!("map:{}", job.map_key);
+        let kept = reuse.take(&step, key.as_ref());
+        let verb = if kept.is_some() { "Keeping unchanged" } else { "Converting" };
+        progress(
+            opts.emit_progress,
+            base_pct,
+            &format!("{verb} map `{}`...", g.display_name),
+        );
+        if let Some(report) = kept {
+            warnings.extend(report.warnings);
+        } else {
+            std::fs::create_dir_all(&map_out)?;
+            // One map that cannot be built leaves the others playable.
+            match bake_map_assets(&job, &map_out, &mut shared) {
+                Ok(found) => {
+                    let report = Replaced {
+                        warnings: found,
+                        ..Default::default()
+                    };
+                    reuse.record(&step, key, &staging, format!("assets/{}", g.map_key), &report);
+                    warnings.extend(report.warnings);
+                }
+                Err(e) => {
+                    std::fs::remove_dir_all(&map_out)?;
+                    warnings.push(format!(
+                        "Map `{}` could not be converted ({e:#}).",
+                        g.display_name
+                    ));
+                    first_failed_map.get_or_insert(e);
+                    continue;
+                }
             }
         }
-
-        if !g.world_loads.is_empty() {
-            shared_world_files.share(&map_out)?;
-        }
+        maps_baked += 1;
 
         let level = level_sides(g);
         if !level.sides.is_empty() {
             levels.push(level);
-        }
-
-        if let Some((snd_name, snd_lvl)) = g.custom_sound_lvls.first() {
-            let sound_out = map_out.join("sounds");
-            if let Some(previous) = sound_bakes.get(snd_lvl) {
-                link_tree(previous, &sound_out)?;
-            } else {
-                let core = insp.core_lvl.as_deref().map(Path::to_string_lossy);
-                match crate::sounds::bake_addon_sounds(
-                    &snd_lvl.to_string_lossy(),
-                    &map_out_str,
-                    core.as_deref(),
-                ) {
-                    Ok(_) => {
-                        sound_bakes.insert(snd_lvl.clone(), sound_out);
-                    }
-                    Err(e) => {
-                        if sound_out.is_dir() {
-                            std::fs::remove_dir_all(&sound_out)?;
-                        }
-                        warnings.push(format!(
-                            "Custom sound archive `{snd_name}` could not be converted ({e:#})."
-                        ));
-                    }
-                }
-            }
-            for (extra, _) in g.custom_sound_lvls.iter().skip(1) {
-                warnings.push(format!(
-                    "Additional custom sound archive `{extra}` is not supported for this map."
-                ));
-            }
         }
 
         let mut planned_missions = Vec::with_capacity(g.missions.len());
@@ -423,35 +391,60 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
                 .collect::<Vec<_>>()
         })
         .collect();
-    warnings.extend(convert_addon_sides(
-        &levels,
-        &script_names,
-        opts.env,
-        &staging,
-        &mut |msg| progress(opts.emit_progress, 81, msg),
-    )?);
+    let key = reuse.key(&units_settings(&levels, &script_names));
+    if let Some(report) = reuse.take("units", key.as_ref()) {
+        progress(opts.emit_progress, 81, "Keeping the maps' unchanged units...");
+        warnings.extend(report.warnings);
+    } else {
+        let report = Replaced {
+            warnings: convert_addon_sides(
+                &levels,
+                &script_names,
+                opts.env,
+                &staging,
+                &mut |msg| progress(opts.emit_progress, 81, msg),
+            )?,
+            ..Default::default()
+        };
+        if staging.join("levels").is_dir() {
+            reuse.record("units", key, &staging, "levels".into(), &report);
+        }
+        warnings.extend(report.warnings);
+    }
 
     // Stock replacements: every active resource operation, translated onto
     // the stock bake's own outputs (`super::replace`).
     let replaced = if discovered.active_ops().next().is_some() {
         let (pct_start, pct_end) = if groups.is_empty() { (10u8, 95u8) } else { (82u8, 95u8) };
-        progress(opts.emit_progress, pct_start, "Converting stock replacements...");
-        let abs: BTreeMap<String, PathBuf> = insp
-            .stock_override_lvls
-            .iter()
-            .map(|o| (o.rel_path.to_ascii_lowercase().replace('\\', "/"), o.abs_path.clone()))
-            .collect();
-        super::replace::convert_replacements(
-            &discovered.resource_ops,
-            &abs,
-            opts.env,
-            &staging.join("overrides").join("assets"),
-            &staging.join("scratch"),
-            (pct_start, pct_end),
-            &mut |pct, msg| progress(opts.emit_progress, pct, msg),
-        )?
+        let key = reuse.key(&ron::to_string(&discovered.resource_ops)?);
+        let kept = reuse.take("replacements", key.as_ref());
+        let verb = if kept.is_some() { "Keeping unchanged" } else { "Converting" };
+        progress(opts.emit_progress, pct_start, &format!("{verb} stock replacements..."));
+        match kept {
+            Some(report) => report,
+            None => {
+                let abs: BTreeMap<String, PathBuf> = insp
+                    .stock_override_lvls
+                    .iter()
+                    .map(|o| (o.rel_path.to_ascii_lowercase().replace('\\', "/"), o.abs_path.clone()))
+                    .collect();
+                let report = super::replace::convert_replacements(
+                    &discovered.resource_ops,
+                    &abs,
+                    opts.env,
+                    &staging.join("overrides").join("assets"),
+                    &staging.join("scratch"),
+                    (pct_start, pct_end),
+                    &mut |pct, msg| progress(opts.emit_progress, pct, msg),
+                )?;
+                if staging.join("overrides").is_dir() {
+                    reuse.record("replacements", key, &staging, "overrides".into(), &report);
+                }
+                report
+            }
+        }
     } else {
-        super::replace::Replaced::default()
+        Replaced::default()
     };
     let _ = std::fs::remove_dir_all(staging.join("scratch"));
     warnings.extend(replaced.warnings.iter().cloned());
@@ -529,8 +522,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     meta.save_atomic(&staging)?;
 
     // Atomic cache directory commit (with backup swap on Windows).
-    swap_dir(&staging, opts.cache_dir)
-        .with_context(|| format!("committing cache {}", opts.cache_dir.display()))?;
+    reuse.commit(&staging)?;
     guard.0 = None;
     progress(opts.emit_progress, 100, "Done");
 
@@ -595,25 +587,6 @@ fn level_sides(group: &mungefs::addon::AddonMapGroup<'_>) -> LevelSides {
         }
     }
     level
-}
-
-fn swap_dir(staging: &Path, target: &Path) -> std::io::Result<()> {
-    if !target.exists() {
-        return std::fs::rename(staging, target);
-    }
-    let backup = target.with_extension(format!("old.{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&backup);
-    std::fs::rename(target, &backup)?;
-    match std::fs::rename(staging, target) {
-        Ok(()) => {
-            let _ = std::fs::remove_dir_all(&backup);
-            Ok(())
-        }
-        Err(e) => {
-            let _ = std::fs::rename(&backup, target);
-            Err(e)
-        }
-    }
 }
 
 #[cfg(test)]
