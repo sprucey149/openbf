@@ -821,6 +821,7 @@ pub(super) fn make_walk_with_counts(
                     &walk.sim,
                 );
                 rt.set_is_campaign(m.is_campaign());
+                rt.set_script_setup(m.script_setup);
                 rt.set_team_rosters(
                     team_classes,
                     if m.is_campaign() {

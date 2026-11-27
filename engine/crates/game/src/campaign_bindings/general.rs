@@ -9,7 +9,7 @@ impl Ctx<'_> {
         Some(match name {
             "IsCampaign" => one(Value::Bool(w.is_campaign)),
             "IsMultiplayerGametype" | "ScriptCB_InMultiplayer" | "ScriptCB_InNetGame" => {
-                one(Value::Bool(false))
+                one(Value::Bool(w.setup_multiplayer))
             }
             "ScriptCB_GetPlatform" => one(Value::str("PC")),
             "ScriptCB_GetNumCameras" => one(Value::Num(1.0)),

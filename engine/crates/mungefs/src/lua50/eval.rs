@@ -191,6 +191,19 @@ struct StandaloneTrace {
 }
 
 impl EvalEnv {
+    /// The value the run's `math.random` calls took, when the script made a
+    /// bounded one: the enumerated pick, else the first range's low end.
+    pub fn script_pick(&self) -> Option<i64> {
+        let trace = self.trace.as_ref()?;
+        let (lo, hi) = trace.random_range?;
+        Some(
+            trace
+                .random_pick
+                .filter(|n| (lo..=hi).contains(n))
+                .unwrap_or(lo),
+        )
+    }
+
     pub fn table(&self, id: usize) -> Option<&LuaTable> {
         self.tables.get(id)
     }

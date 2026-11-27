@@ -97,7 +97,7 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 
 1. **Static Lua 5.0 translation (`mungefs::lua50`, `mungefs::addon`, `bake::mods::mission`):**
    - `mungefs::lua50` parses compiled Lua 5.0 chunks and runs a bounded static opcode evaluator (`evaluate_standalone_registration`, `analyze_standalone_variants`) in a standalone environment (external mod checks evaluate false so cross-mod registrations stay out of standalone Instant Action).
-   - `mungefs::addon::mission_fold` folds team rosters, eras, modes (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`), heroes, spawns, audio planet references, and multi-variant world selections (retaining single-player weights and the fixed multiplayer branch).
+   - `mungefs::addon::mission_fold` folds team rosters, eras, modes (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`), heroes, spawns, audio planet references, and variant selections (retaining single-player weights and the multiplayer branch). Variants are distinct when their world loads, class load order, teams, third teams or heroes differ. The mission file records the value `math.random` took (`script_setup`), and the game runs the script's setup with the same value, so the running script agrees with the converted roster.
    - `mungefs::addon::world_events::compile` extracts a closed set of deterministic world actions (named station destruction, one-shot timers, world animation triggers, route/barrier toggles, object kills, named effects) from reachable callbacks.
    - `bake::mods::mission` emits native `missions/mod_<slug>__*.ron` files.
 2. **Addon world & audio baking (`bake::mods::convert`, `bake::mods::world`):**

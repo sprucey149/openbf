@@ -171,6 +171,55 @@ pub fn select_world_variant(
         .to_owned()
 }
 
+/// The mission file a round of `map` plays, when the addon script behind
+/// `picked` set up more than one roster: a multiplayer round takes the
+/// script's multiplayer run, a single-player one rolls by the runs' weights.
+/// `None` keeps `picked`.
+pub fn select_roster(map: &str, picked: &str, seed: u32, multiplayer: bool) -> Option<String> {
+    let state = RUNTIME_STATE.read().unwrap_or_else(|e| e.into_inner());
+    let summary = state
+        .active
+        .iter()
+        .flat_map(|m| &m.maps)
+        .find(|m| m.map_key == map)?;
+    choose_roster(&summary.missions, picked, seed, multiplayer)
+        .filter(|file| *file != picked)
+        .map(str::to_owned)
+}
+
+fn choose_roster<'a>(
+    missions: &'a [extensions::mods::ModMissionSummary],
+    picked: &str,
+    seed: u32,
+    multiplayer: bool,
+) -> Option<&'a str> {
+    let script = &missions
+        .iter()
+        .find(|m| m.mission_ron == picked)?
+        .script_name;
+    let runs = || {
+        missions
+            .iter()
+            .filter(move |m| m.supported && m.script_name == *script)
+    };
+    if multiplayer {
+        return runs()
+            .find(|m| m.multiplayer_variant)
+            .map(|m| m.mission_ron.as_str());
+    }
+    let candidates: Vec<&str> = runs()
+        .flat_map(|m| {
+            std::iter::repeat_n(m.mission_ron.as_str(), usize::from(m.single_player_weight))
+        })
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    // OURS: its own stream, so the troops do not follow the world variant's draw.
+    let draw = core::rng::SimRng::new(seed ^ 0x7200_5EED).next_rand() as usize;
+    Some(candidates[draw % candidates.len()])
+}
+
 fn choose_world_variant<'a>(
     row: &'a ModMapEntry,
     maps: impl Iterator<Item = &'a ModMapSummary>,
@@ -849,13 +898,44 @@ pub fn mount_enabled_mods(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
     use extensions::mods::{
         compute_mod_fingerprint, ModContentType, ModMissionSummary, ReplacementOutput,
         MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_ID,
     };
     use extensions::profile::ExtensionProfile;
+    use std::collections::BTreeSet;
     use std::sync::Mutex;
+
+    #[test]
+    fn a_picked_mission_is_drawn_among_its_scripts_rosters() {
+        let row = |file: &str, script: &str, weight: u8, multiplayer: bool| ModMissionSummary {
+            script_name: script.into(),
+            mode: "con".into(),
+            era: "gcw".into(),
+            mission_ron: file.into(),
+            single_player_weight: weight,
+            multiplayer_variant: multiplayer,
+            supported: true,
+            unsupported_reason: None,
+        };
+        let rows = [
+            row("a.ron", "abrg_con", 1, false),
+            row("b.ron", "abrg_con", 2, false),
+            row("online.ron", "abrg_con", 0, true),
+            row("other.ron", "abrg_ctf", 1, true),
+        ];
+        assert_eq!(choose_roster(&rows, "a.ron", 7, true), Some("online.ron"));
+        let drawn: BTreeSet<&str> = (0..64)
+            .filter_map(|seed| choose_roster(&rows, "a.ron", seed, false))
+            .collect();
+        assert_eq!(drawn, BTreeSet::from(["a.ron", "b.ron"]));
+        assert_eq!(
+            choose_roster(&rows, "a.ron", 11, false),
+            choose_roster(&rows, "b.ron", 11, false),
+            "one seed, one draw, whichever row was picked"
+        );
+        assert_eq!(choose_roster(&rows, "missing.ron", 7, false), None);
+    }
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 

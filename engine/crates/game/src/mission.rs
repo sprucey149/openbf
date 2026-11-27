@@ -150,6 +150,11 @@ pub struct MissionDef {
     /// late and 2026-11-21: Hunt-only easier AI. No other mode reads it.
     #[serde(default)]
     pub hunt_skill_pct: Option<[[u32; 2]; 4]>,
+    /// How the converter ran this addon script's setup, `(math.random value,
+    /// multiplayer)`: the rosters above are that run's, so the `ScriptInit`
+    /// replay must take the same values (a V.I.P. is picked there).
+    #[serde(default)]
+    pub script_setup: Option<(Option<i64>, bool)>,
     /// PS2 `SetHeroClass` in Lua team order; BF1 identities use BF2 playable kits.
     #[serde(default)]
     pub heroes: Vec<(u8, String)>,

@@ -113,6 +113,8 @@ struct MissionDefRon {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     class_properties: Vec<(String, String, String)>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    script_setup: Option<(Option<i64>, bool)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     script: Option<manifest::script_ir::ScriptDef>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     script_libs: Vec<(String, String)>,
@@ -282,6 +284,8 @@ pub fn mission_to_ron(
                 .collect(),
         },
         class_properties: m.class_properties.clone(),
+        script_setup: (m.script_pick.is_some() || m.script_multiplayer)
+            .then_some((m.script_pick, m.script_multiplayer)),
         script,
         script_libs,
         source: format!("addon:{}", m.script_name),

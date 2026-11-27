@@ -183,6 +183,10 @@ pub struct Interp {
     steps: u32,
     depth: u32,
     rng: core::rng::SimRng,
+    /// While set, a bounded `math.random` returns this value when it is in
+    /// range, else the range's low end: the rule the converter read the
+    /// addon's rosters with.
+    pub pinned_random: Option<i64>,
     pub printed: Vec<String>,
 }
 
@@ -208,6 +212,7 @@ impl Interp {
             steps: 0,
             depth: 0,
             rng: core::rng::SimRng::new(0x5EED_C0DE),
+            pinned_random: None,
             printed: Vec::new(),
         }
     }
@@ -970,6 +975,17 @@ impl Interp {
                     a - (a / b).trunc() * b
                 })]
             }
+            "math.random" | "random" if self.pinned_random.is_some() && !args.is_empty() => {
+                let (lo, hi) = if args.len() == 1 {
+                    (1.0, arg(0).num().unwrap_or(1.0).floor())
+                } else {
+                    let lo = arg(0).num().unwrap_or(1.0).floor();
+                    (lo, arg(1).num().unwrap_or(lo).floor())
+                };
+                let pick = self.pinned_random.unwrap_or_default() as f32;
+                let v = if (lo..=hi).contains(&pick) { pick } else { lo };
+                vec![Value::Num(v)]
+            }
             "math.random" | "random" => {
                 let r = self.rng.next_rand() as u64;
                 let v = match args.len() {
@@ -1216,6 +1232,28 @@ mod tests {
             ])"#);
         assert_eq!(calls, ["Probe(7)", "Probe(2,a,cp1)"]);
         assert_eq!(it.global("Missing"), Value::Nil);
+    }
+
+    #[test]
+    fn a_pinned_pick_answers_every_bounded_random_draw() {
+        let def = Arc::new(
+            parse(
+                r#"(main: 0, fns: [
+                (name: "main", params: 0, locals: 0, body: [
+                    Do(Call(Global("Probe"), [Call(Global("math.random"), [Num(1.0), Num(3.0)])])),
+                    Do(Call(Global("Probe"), [Call(Global("math.random"), [Num(3.0)])])),
+                    Do(Call(Global("Probe"), [Call(Global("math.random"), [Num(5.0), Num(9.0)])])),
+                ]),
+            ])"#,
+            )
+            .expect("parse"),
+        );
+        let mut it = Interp::new(def, &[]);
+        it.pinned_random = Some(3);
+        let mut host = NoHost(Vec::new());
+        it.run_main(&mut host).expect("run");
+        // A range without the pick takes its low end.
+        assert_eq!(host.0, ["Probe(3)", "Probe(3)", "Probe(5)"]);
     }
 
     #[test]

@@ -429,6 +429,8 @@ pub(crate) struct World {
     pub class_names: Vec<String>,
 
     pub setup: bool,
+    /// `ScriptCB_InMultiplayer` while the setup is replayed.
+    pub setup_multiplayer: bool,
     pub is_campaign: bool,
     pub post_loaded: bool,
     pub player: UnitHandle,
@@ -507,6 +509,7 @@ pub struct CampaignRuntime {
     interp: Interp,
     pub(crate) w: World,
     started: bool,
+    script_setup: Option<(Option<i64>, bool)>,
 }
 
 /// The bindings' view of one call: the world and the sim.
@@ -520,6 +523,11 @@ impl CampaignRuntime {
     /// returning each post's pre-kill owner so `RespawnObject` can restore it.
     pub fn set_is_campaign(&mut self, is_campaign: bool) {
         self.w.is_campaign = is_campaign;
+    }
+
+    /// `MissionDef::script_setup`: how `ScriptInit` is replayed.
+    pub fn set_script_setup(&mut self, setup: Option<(Option<i64>, bool)>) {
+        self.script_setup = setup;
     }
 
     pub fn kill_startup_posts(sim: &mut Sim, killed: &[String]) -> Vec<Option<u8>> {
@@ -641,6 +649,7 @@ impl CampaignRuntime {
             class_order: [Vec::new(), Vec::new()],
             class_names: Vec::new(),
             setup: false,
+            setup_multiplayer: false,
             is_campaign: true,
             post_loaded: false,
             player: UnitHandle { index: 0, gen: 0 },
@@ -690,6 +699,7 @@ impl CampaignRuntime {
             interp,
             w,
             started: false,
+            script_setup: None,
         }
     }
 
@@ -808,7 +818,13 @@ impl CampaignRuntime {
             }
         }
         self.w.setup = true;
+        if let Some((pick, multiplayer)) = self.script_setup {
+            self.interp.pinned_random = pick;
+            self.w.setup_multiplayer = multiplayer;
+        }
         self.call_global(sim, "ScriptInit", Vec::new());
+        self.interp.pinned_random = None;
+        self.w.setup_multiplayer = false;
         self.w.setup = false;
         self.call_global(sim, "ScriptPostLoad", Vec::new());
         self.w.post_loaded = true;

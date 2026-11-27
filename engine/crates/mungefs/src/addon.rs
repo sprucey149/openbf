@@ -125,6 +125,12 @@ pub struct InspectedMission {
     pub single_player_weight: u8,
     pub multiplayer_variant: bool,
     pub shares_variant_entry: bool,
+    /// The value this variant's `math.random` calls took in the static run,
+    /// for a script that makes a bounded choice while it is set up. The game
+    /// replays `ScriptInit` with the same value (`MissionDef::script_setup`).
+    pub script_pick: Option<i64>,
+    /// This variant was read with `ScriptCB_InMultiplayer` true.
+    pub script_multiplayer: bool,
     pub world_events: WorldEvents,
     pub teams: Vec<ParsedTeam>,
     pub local_teams: Vec<LocalTeamDef>,
@@ -168,6 +174,18 @@ pub struct InspectedMission {
     pub supported: bool,
     pub unsupported_reason: Option<String>,
     pub unsupported_features: Vec<UnsupportedScriptFeature>,
+}
+
+impl InspectedMission {
+    /// Two runs of a script's setup that ask for the same worlds and the same
+    /// units are one variant; a random troop or hero choice makes another.
+    fn same_variant(&self, other: &Self) -> bool {
+        self.world_loads == other.world_loads
+            && self.class_load_order == other.class_load_order
+            && self.teams == other.teams
+            && self.local_teams == other.local_teams
+            && self.heroes == other.heroes
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -358,7 +376,14 @@ impl AddonInspection {
                 };
                 let mut fname = format!("{map_key}_{}{era_suffix}.ron", m.mode);
                 if !used_filenames.insert(fname.clone()) {
-                    fname = format!("{map_key}_{}.ron", m.script_name.to_ascii_lowercase());
+                    let script = m.script_name.to_ascii_lowercase();
+                    fname = format!("{map_key}_{script}.ron");
+                    // A script's further rosters share its name.
+                    let mut n = 2usize;
+                    while !used_filenames.insert(fname.clone()) {
+                        fname = format!("{map_key}_{script}_{n}.ron");
+                        n += 1;
+                    }
                 }
                 planned.push(AddonPlannedMission {
                     mission: m,
@@ -1501,24 +1526,28 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                 let (single_player, multiplayer) =
                     lua50::analyze_standalone_variants(proto, &script_protos);
                 let mut variants: Vec<InspectedMission> = Vec::new();
-                for mut mission in single_player.iter().map(fold) {
-                    if let Some(previous) = variants
-                        .iter_mut()
-                        .find(|m| m.world_loads == mission.world_loads)
-                    {
+                let picked = single_player.iter().map(|analysis| {
+                    let mut mission = fold(analysis);
+                    mission.script_pick = analysis.env.script_pick();
+                    mission
+                });
+                for mut mission in picked {
+                    if let Some(previous) = variants.iter_mut().find(|m| m.same_variant(&mission)) {
                         previous.single_player_weight += 1;
                     } else {
                         mission.single_player_weight = 1;
                         variants.push(mission);
                     }
                 }
+                let mp_pick = multiplayer.env.script_pick();
                 let mut multiplayer = fold(&multiplayer);
-                if let Some(m) = variants
-                    .iter_mut()
-                    .find(|m| m.world_loads == multiplayer.world_loads)
-                {
+                multiplayer.script_pick = mp_pick;
+                multiplayer.script_multiplayer = true;
+                if let Some(m) = variants.iter_mut().find(|m| m.same_variant(&multiplayer)) {
                     m.multiplayer_variant = true;
-                } else if !multiplayer.world_loads.is_empty() {
+                } else if !multiplayer.world_loads.is_empty()
+                    || variants.iter().all(|m| m.world_loads.is_empty())
+                {
                     multiplayer.multiplayer_variant = true;
                     variants.push(multiplayer);
                 }
@@ -1526,6 +1555,7 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                     // Keep the original declarative extraction for single-archive scripts.
                     let mut mission = fold(&lua50::analyze_mission_script(proto.clone()));
                     mission.world_loads.clear();
+                    mission.script_pick = variants[0].script_pick;
                     mission.single_player_weight = 1;
                     mission.multiplayer_variant = true;
                     variants = vec![mission];
@@ -1551,7 +1581,11 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                     }
                 }
                 let ir_check = lua50::ir::translate(proto).err().map(|e| e.to_string());
-                let shares_variant_entry = variants.len() > 1;
+                // One menu row for a script's worlds; variants that differ
+                // only in their rosters are one world already.
+                let shares_variant_entry = variants
+                    .iter()
+                    .any(|m| m.world_loads != variants[0].world_loads);
                 for mut mission in variants {
                     mission.shares_variant_entry = shares_variant_entry;
                     if mission.scripted_mode && mission.supported {

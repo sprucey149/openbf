@@ -30,10 +30,47 @@ pub(super) fn shell_setup(
     seed: u32,
     difficulty: core::skill::Difficulty,
 ) -> Result<BattleSetup> {
+    setup_for(
+        missions_dir,
+        assets_dir,
+        name,
+        mode,
+        row_armies,
+        session,
+        seed,
+        difficulty,
+        false,
+    )
+}
+
+/// [`shell_setup`] for a single-player or a `multiplayer` round, which
+/// an addon script may set up differently.
+#[allow(clippy::too_many_arguments)]
+fn setup_for(
+    missions_dir: &Path,
+    assets_dir: &Path,
+    name: &str,
+    mode: &str,
+    row_armies: &[String; 2],
+    session: &ui::shell::SessionOptions,
+    seed: u32,
+    difficulty: core::skill::Difficulty,
+    multiplayer: bool,
+) -> Result<BattleSetup> {
     let armies = [row_armies[0].as_str(), row_armies[1].as_str()];
     let xl = mode == ui::shell::Mode::Xl.subst();
     let mission_mode = if xl { "con" } else { mode };
-    let pick = game::mission::pick(missions_dir, name, mission_mode, armies);
+    let mut pick = game::mission::pick(missions_dir, name, mission_mode, armies);
+    // An addon script that rolls its troops has one mission file per roll.
+    if let Some(p) = pick.as_mut() {
+        let rolled = super::file_name(&p.path)
+            .and_then(|f| game::mods_runtime::select_roster(name, &f, seed, multiplayer));
+        if let Some(file) = rolled {
+            let path = missions_dir.join(file);
+            p.mission = game::mission::MissionDef::load(&path)?;
+            p.path = path;
+        }
+    }
     if xl {
         let code = name.strip_prefix("bf2_").unwrap_or(name);
         anyhow::ensure!(
@@ -167,7 +204,7 @@ pub(super) fn battle_setup(
     let session = round
         .options
         .to_session(ui::shell::SessionOptions::default());
-    let mut setup = shell_setup(
+    let mut setup = setup_for(
         missions_dir,
         assets_dir,
         &round.map,
@@ -176,6 +213,7 @@ pub(super) fn battle_setup(
         &session,
         round.seed,
         round.difficulty,
+        true,
     )?;
     // Issue #171: the LAN marker from the opening wave on, and the
     // opening wave counts every round-start human, not only slot 0.
