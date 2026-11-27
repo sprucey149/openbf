@@ -418,8 +418,8 @@ mod tests {
         let difficulty = core::skill::Difficulty::Normal;
         let mode = Mode::Xl;
         let mut ia = game::shell_ia::instant_action(&assets, missions, difficulty);
-        assert_eq!(ia.texts.mode(mode).0, "XL");
-        ia.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        assert_eq!(ia.texts.mode(&mode).0, "XL");
+        ia.add(MapPick::All, ModePick::One(mode.clone()), SidePick::AllEras);
         let rows = ia.launch();
         let mut pairs: Vec<_> = rows
             .iter()
@@ -436,7 +436,7 @@ mod tests {
             ]
         );
         let mut lobby = game::shell_ia::lobby_instant_action(&assets, missions, difficulty);
-        lobby.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        lobby.add(MapPick::All, ModePick::One(mode.clone()), SidePick::AllEras);
         assert!(lobby.launch().is_empty());
 
         for row in rows {
@@ -550,7 +550,7 @@ mod tests {
         let difficulty = core::skill::Difficulty::Normal;
         let mode = Mode::Xl;
         let mut ia = game::shell_ia::instant_action(&assets, missions, difficulty);
-        ia.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        ia.add(MapPick::All, ModePick::One(mode.clone()), SidePick::AllEras);
         let rows = ia.launch();
         let options = ia.options;
         // (row index, seed, clock in seconds)
@@ -566,6 +566,7 @@ mod tests {
             }
         }
         const MAX_TICKS: u64 = 20 * 60 * core::TICK_HZ as u64;
+        let mode = &mode;
         let results = std::thread::scope(|s| {
             let handles: Vec<_> = plan
                 .iter()
