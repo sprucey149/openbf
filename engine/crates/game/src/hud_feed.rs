@@ -801,18 +801,6 @@ fn build_hud(
             fisto::install(&mut hud, art, &donor);
         }
     }
-    // The two faded pills belong behind the weapon images, including
-    // bitmap fallbacks. Our per-model depth slices follow draw order,
-    // so the source ZOrder(8) would shade the default-128 item groups.
-    // Change only these siblings' presentation order; retain their
-    // transforms, alpha and internal mesh depth (also in flat PC trees).
-    for name in ["player1weapon1backdrop", "player1weapon2backdrop"] {
-        if let Some(i) = hud.find(name) {
-            if hud.elems[i].kind == Kind::Model3D {
-                hud.elems[i].z_order = u8::MAX;
-            }
-        }
-    }
     hud.set_fonts(&art.fonts);
     // The layout's own labels ("Victory In"), from BF2's text table.
     if let Some(locl) = crate::event_feed::read_locl(&common) {

@@ -596,6 +596,14 @@ pub(crate) fn color(rgb: [f32; 3], alpha: f32) -> [f32; 4] {
     ]
 }
 
+/// One element on the draw list: where its group puts it, and how solid.
+struct Linked {
+    elem: usize,
+    parent: Mat4,
+    screen: Screen,
+    alpha: f32,
+}
+
 pub(crate) struct Ctx<'a> {
     pub(crate) hud: &'a Hud,
     pub(crate) art: &'a HudArt,
@@ -926,7 +934,17 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// Draw element `i` and what it holds.
     fn element(&mut self, i: usize, parent: &Mat4, s: &Screen) {
+        let mut list = Vec::new();
+        self.link(i, parent, s, &mut list);
+        self.scene(list);
+    }
+
+    /// Put what element `i` and its children show on the draw list. A group
+    /// only places its children. Walking each group's children last first
+    /// leaves the later of two records first.
+    fn link(&mut self, i: usize, parent: &Mat4, s: &Screen, list: &mut Vec<Linked>) {
         let hud = self.hud;
         let e = &hud.elems[i];
         if e.fader.state == 0 || e.is_segment {
@@ -936,31 +954,52 @@ impl<'a> Ctx<'a> {
         if alpha <= 0.0 {
             return;
         }
-        let m = *parent * e.local();
-        match e.kind {
-            Kind::Group => {
-                // A group's Rect hangs its children on the origin like a
-                // bitmap's own ([D] `re-event-messages.md` §5: the PS2 frame
-                // has `player1stats` — Rect(1, 1, Left, Center) — half a
-                // viewport above where its Position alone would put it).
-                let (ox, oy) = e.rect.origin();
-                let m = m * Mat4::from_translation(Vec3::new(ox, oy, 0.0));
-                // 255 first (the back), 0 last; equal z: the later record
-                // first (`re-hud.md` §2.1 [V] `FUN_005a3368`).
-                let mut order: Vec<usize> = e.children.clone();
-                order.reverse();
-                order.sort_by_key(|c| std::cmp::Reverse(hud.elems[*c].z_order));
-                for c in order {
-                    self.element(c, &m, s);
-                }
+        if e.kind != Kind::Group {
+            list.push(Linked {
+                elem: i,
+                parent: *parent,
+                screen: *s,
+                alpha,
+            });
+            return;
+        }
+        // A group's Rect hangs its children on the origin like a bitmap's own
+        // ([D] `re-event-messages.md` §5: the PS2 frame has `player1stats` —
+        // Rect(1, 1, Left, Center) — half a viewport above where its Position
+        // alone would put it).
+        let (ox, oy) = e.rect.origin();
+        let m = *parent * e.local() * Mat4::from_translation(Vec3::new(ox, oy, 0.0));
+        for &c in e.children.iter().rev() {
+            self.link(c, &m, s, list);
+        }
+    }
+
+    /// Draw a list in the scene's order: one list for the whole screen,
+    /// whatever group holds an element (PS2 `FUN_0039e9a8` links each shown
+    /// element into its viewport's root), ZOrder 255 first (the back) and 0
+    /// last; equal z: the later record first (`re-hud.md` §2.1 [V]
+    /// `FUN_005a3368`).
+    fn scene(&mut self, mut list: Vec<Linked>) {
+        let hud = self.hud;
+        list.sort_by_key(|l| std::cmp::Reverse(hud.elems[l.elem].z_order));
+        for Linked {
+            elem: i,
+            parent,
+            screen,
+            alpha,
+        } in list
+        {
+            let e = &hud.elems[i];
+            let (s, m) = (&screen, parent * e.local());
+            match e.kind {
+                Kind::Bitmap | Kind::BarBitmap => self.bitmap(i, e, &m, s, alpha),
+                Kind::BarSegmented => self.segmented(i, e, &m, s, alpha),
+                Kind::Text => self.elem_text(i, e, &m, s, alpha),
+                Kind::MultiLineText => self.multiline(i, e, &m, s, alpha),
+                Kind::Model3D => self.model(i, e, &parent, s, alpha),
+                Kind::Map => self.map(i, e, &parent, s, alpha),
+                Kind::Group | Kind::Other => {}
             }
-            Kind::Bitmap | Kind::BarBitmap => self.bitmap(i, e, &m, s, alpha),
-            Kind::BarSegmented => self.segmented(i, e, &m, s, alpha),
-            Kind::Text => self.elem_text(i, e, &m, s, alpha),
-            Kind::MultiLineText => self.multiline(i, e, &m, s, alpha),
-            Kind::Model3D => self.model(i, e, parent, s, alpha),
-            Kind::Map => self.map(i, e, parent, s, alpha),
-            Kind::Other => {}
         }
     }
 
@@ -1675,7 +1714,8 @@ fn draw_tree(hud: &Hud, art: &HudArt, f: &Frame, skip: Option<usize>) -> HudFram
     let mut order: Vec<usize> = if tree { hud.roots.clone() } else { Vec::new() };
     order.retain(|r| Some(*r) != skip);
     order.reverse();
-    order.sort_by_key(|c| std::cmp::Reverse(hud.elems[*c].z_order));
+    let mut list = Vec::new();
+    let mut space = None;
     for r in order {
         let e = &hud.elems[r];
         // The countdowns' children sit at the right edge of the 4:3 frame,
@@ -1700,14 +1740,14 @@ fn draw_tree(hud: &Hud, art: &HudArt, f: &Frame, skip: Option<usize>) -> HudFram
             ),
             None => (f.tree(anchor_x, hud.v_anchor(r)), Mat4::IDENTITY),
         };
-        ctx.element(r, &parent, &screen);
-        if let Some(status) = hud
-            .space
-            .as_ref()
-            .filter(|_| tree && e.name == crate::hud_space::GROUP)
-        {
-            ctx.space_status(status, e, r, &screen);
+        ctx.link(r, &parent, &screen, &mut list);
+        if tree && e.name == crate::hud_space::GROUP {
+            space = Some((r, screen));
         }
+    }
+    ctx.scene(list);
+    if let (Some(status), Some((r, screen))) = (hud.space.as_ref(), space) {
+        ctx.space_status(status, &hud.elems[r], r, &screen);
     }
     if tree {
         ctx.hint_markers(f);
