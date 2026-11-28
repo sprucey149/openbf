@@ -1474,6 +1474,8 @@ pub fn faction_name(key: &str) -> String {
         "cis" => "CIS".into(),
         "all" => "Rebels".into(),
         "imp" => "Empire".into(),
+        "hero" => "Heroes".into(),
+        "villain" => "Villains".into(),
         other => {
             let mut c = other.chars();
             c.next()
