@@ -33,12 +33,24 @@ pub struct OverlayLayer {
 
 static OVERLAYS: RwLock<Vec<OverlayLayer>> = RwLock::new(Vec::new());
 static SCOPE: RwLock<Option<String>> = RwLock::new(None);
+static LEVEL: RwLock<Option<String>> = RwLock::new(None);
+
+/// A layer whose scope is this and a map's directory name serves only while
+/// [`set_level_scope`] names that map.
+pub const LEVEL_SCOPE: &str = "level:";
 
 /// The game whose battle is loading (`"bf1"` / `"bf2"`), or `None` outside a
 /// battle. Scoped override layers serve only their own game; with no scope
 /// set they serve everything, which is what the menus see.
 pub fn set_overlay_scope(game: Option<&str>) {
     *SCOPE.write().unwrap_or_else(|e| e.into_inner()) = game.map(str::to_ascii_lowercase);
+    set_level_scope(None);
+}
+
+/// The map being loaded, by its directory name, after [`set_overlay_scope`].
+/// A map's own layer ([`LEVEL_SCOPE`]) serves no other map and no menu.
+pub fn set_level_scope(map: Option<&str>) {
+    *LEVEL.write().unwrap_or_else(|e| e.into_inner()) = map.map(str::to_ascii_lowercase);
 }
 
 pub fn overlay_scope() -> Option<String> {
@@ -46,6 +58,9 @@ pub fn overlay_scope() -> Option<String> {
 }
 
 fn in_scope(scope: &Option<String>) -> bool {
+    if let Some(map) = scope.as_deref().and_then(|s| s.strip_prefix(LEVEL_SCOPE)) {
+        return LEVEL.read().unwrap_or_else(|e| e.into_inner()).as_deref() == Some(map);
+    }
     match (scope, &*SCOPE.read().unwrap_or_else(|e| e.into_inner())) {
         (Some(layer), Some(active)) => layer == active,
         _ => true,

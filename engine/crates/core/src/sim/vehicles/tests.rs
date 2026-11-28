@@ -559,6 +559,7 @@ fn pad(team: Option<u8>, cp: Option<usize>) -> PadDef {
         decay_time: DECAY_TIME,
         spawn_count: 1,
         classes: [class(7), class(8)],
+        neutral: None,
     }
 }
 

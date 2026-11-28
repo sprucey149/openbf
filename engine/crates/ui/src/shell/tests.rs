@@ -208,6 +208,106 @@ fn the_merged_list_is_both_games_case_folded() {
     assert_eq!(rows[40].text, "All Maps");
 }
 
+/// `[ours]` Grouped by source: the two games, then the mods by name, each
+/// opening to its maps without the suffix; All Maps stays inside the open
+/// folder.
+#[test]
+fn grouped_maps_open_by_source_folder() {
+    let mod_map = |key: &str, name: &str, source: &str| ModMapEntry {
+        stock_row: None,
+        key: key.into(),
+        variant_keys: vec![key.into()],
+        legacy_code: "abr".into(),
+        name: name.into(),
+        disambiguator: source.into(),
+        description: String::new(),
+        modes: std::collections::BTreeMap::from([
+            (Era::Cw, vec![Mode::Con]),
+            (Era::Gcw, vec![Mode::Con]),
+        ]),
+        era_overrides: std::collections::BTreeMap::new(),
+        source: source.into(),
+    };
+    let mod_maps = [
+        mod_map("mod_z__abr", "Abregado-Rae", "Zeta Pack"),
+        mod_map("mod_a__abr", "Yoda's Hut", "alpha maps"),
+    ];
+    let bakes = [
+        ("bf1_hot1", "bf1"),
+        ("bf1_bes1", "bf1"),
+        ("bf2_hot1", "bf2"),
+        ("mod_z__abr", "bf2"),
+        ("mod_a__abr", "bf2"),
+    ]
+    .map(|(k, g)| (k.to_owned(), g.to_owned()));
+    let missions = |_: &str, mode: Mode| match mode {
+        Mode::Con => vec![["all".to_owned(), "imp".to_owned()]],
+        _ => Vec::new(),
+    };
+    let mut m = InstantAction::new(
+        catalog_with_mods(&text, &bakes, &missions, &mod_maps),
+        IaTexts::new(&|_, e| e.to_owned()),
+        SessionOptions::default(),
+    );
+    m.group_by_source();
+    let texts =
+        |m: &InstantAction| -> Vec<String> { m.map_rows().into_iter().map(|r| r.text).collect() };
+    assert_eq!(
+        texts(&m),
+        [
+            "Battlefront 1",
+            "Battlefront 2",
+            "alpha maps",
+            "Zeta Pack",
+            "All Maps"
+        ]
+    );
+
+    m.focus_command(Cmd::Add);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Map);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Map, "a folder opens in place");
+    let bf1 = texts(&m);
+    assert_eq!(bf1.len(), BF1_MAPS.len() + 1);
+    assert_eq!(bf1[0], "Bespin: Cloud City");
+    assert_eq!(bf1[bf1.len() - 1], "All Maps");
+    assert!(bf1.iter().all(|t| !t.contains("(bf")), "{bf1:?}");
+    m.step(triangle(), 0.0);
+    assert_eq!(m.state, State::Map);
+    assert_eq!(m.folder, None);
+    assert_eq!(m.map_list.at, 0);
+    m.step(triangle(), 0.0);
+    assert_eq!(m.state, State::Command);
+
+    // The folder's All Maps, then every mode and era.
+    m.focus_command(Cmd::Add);
+    m.step(cross(), 0.0);
+    m.step(cross(), 0.0);
+    m.step(up(), 0.0);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Mode);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Era);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Command);
+    assert_eq!(m.folder, None);
+    let added: Vec<&str> = m
+        .playlist
+        .iter()
+        .map(|e| m.maps[e.map].source.as_str())
+        .collect();
+    assert!(!added.is_empty());
+    assert!(added.iter().all(|s| *s == "Battlefront 1"), "{added:?}");
+
+    // At the folders, All Maps is every map.
+    m.playlist.clear();
+    m.add(MapPick::All, ModePick::All, SidePick::AllEras);
+    let mut all: Vec<usize> = m.playlist.iter().map(|e| e.map).collect();
+    all.dedup();
+    assert_eq!(all.len(), bakes.len());
+}
+
 /// §7: the unbaked space maps are dimmed and the cursor skips them both
 /// ways; a mode the port does not run is dimmed, and so is All Modes with
 /// only Conquest live.
@@ -316,8 +416,8 @@ fn the_states_and_their_presses() {
     assert_eq!(COMMANDS[m.command], Cmd::Launch);
     assert_eq!(m.playlist.len(), 1);
     assert_eq!(m.play_rows()[1].text, "Hoth (bf2)");
-    assert_eq!(m.play_rows()[1].icon, Some("mode_icon_con"));
-    assert_eq!(m.play_rows()[1].icon2, Some("imp_icon"));
+    assert_eq!(m.play_rows()[1].icon.as_deref(), Some("mode_icon_con"));
+    assert_eq!(m.play_rows()[1].icon2.as_deref(), Some("imp_icon"));
     // REMOVE -> the playlist on "Remove All" (info empty), Down, Cross
     // deletes Hoth; with only Remove All left the focus is ADD.
     m.step(down(), 0.0);
@@ -376,7 +476,7 @@ fn all_maps_modes_eras_and_the_cap() {
         .position(|e| e.label == "Kashyyyk (bf2)")
         .unwrap();
     m.add(MapPick::One(hoth), ModePick::All, SidePick::AllEras);
-    let sides: Vec<Side> = m.playlist.iter().map(|e| e.side).collect();
+    let sides: Vec<Side> = m.playlist.iter().map(|e| e.side.clone()).collect();
     assert_eq!(sides, [Side::Era(Era::Cw), Side::Era(Era::Gcw)]);
     assert!(m.playlist.iter().all(|e| e.mode == Mode::Con));
     m.playlist.clear();
@@ -388,7 +488,7 @@ fn all_maps_modes_eras_and_the_cap() {
         .maps
         .iter()
         .filter(|e| e.baked)
-        .map(|e| ERAS.iter().filter(|x| e.has_era(**x)).count())
+        .map(|e| ERAS.iter().filter(|x| e.has_era(x)).count())
         .sum();
     assert_eq!(m.playlist.len(), expected);
     assert!(!m.full);
@@ -1069,9 +1169,9 @@ fn hunt_queues_the_native_matchup_from_the_selected_map() {
             .position(|map| map.game == game && map.key.ends_with("_end1"))
             .unwrap();
         let map = &shell.maps[index];
-        assert!(map.runnable(Mode::Hunt, side));
-        assert!(!map.runnable(Mode::Hunt, Side::Era(Era::Cw)));
-        shell.add(MapPick::One(index), mode, SidePick::One(side));
+        assert!(map.runnable(&Mode::Hunt, &side));
+        assert!(!map.runnable(&Mode::Hunt, &Side::Era(Era::Cw)));
+        shell.add(MapPick::One(index), mode.clone(), SidePick::One(side.clone()));
     }
     shell.focus_command(Cmd::Launch);
     let Some(IaCommand::Launch(playlist)) = shell.step(cross(), 0.0) else {
@@ -1176,12 +1276,12 @@ fn hero_assault_needs_a_mission_and_a_single_era() {
     let list = catalog(&text, &bakes, &without_coruscant);
     let map = |list: &[MapEntry], key: &str| list.iter().find(|m| m.key == key).unwrap().clone();
     let tat2 = map(&list, "tat2");
-    assert!(tat2.runnable(Mode::Eli, Side::Era(Era::Gcw)));
-    assert!(!tat2.runnable(Mode::Eli, Side::Era(Era::Cw)));
-    assert!(!tat2.runnable(Mode::Eli, Side::Mixed(0)));
-    assert!(!map(&list, "bf2_cor1").runnable(Mode::Eli, Side::Era(Era::Gcw)));
+    assert!(tat2.runnable(&Mode::Eli, &Side::Era(Era::Gcw)));
+    assert!(!tat2.runnable(&Mode::Eli, &Side::Era(Era::Cw)));
+    assert!(!tat2.runnable(&Mode::Eli, &Side::Mixed(0)));
+    assert!(!map(&list, "bf2_cor1").runnable(&Mode::Eli, &Side::Era(Era::Gcw)));
     let list = catalog(&text, &bakes, &with_coruscant);
-    assert!(map(&list, "bf2_cor1").runnable(Mode::Eli, Side::Era(Era::Gcw)));
+    assert!(map(&list, "bf2_cor1").runnable(&Mode::Eli, &Side::Era(Era::Gcw)));
 }
 
 /// Issue #172 (playtest): the Assault AI Units row's help is openbf's own,
@@ -1259,22 +1359,34 @@ fn bf2_only_catalog_hides_bf1_maps() {
 fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
     let mod_maps = vec![
         ModMapEntry {
+            stock_row: None,
             key: "mod_abr__abr".into(),
             variant_keys: vec!["mod_abr__abr".into()],
             legacy_code: "abr".into(),
             name: "Abregado-Rae: Venezia".into(),
             disambiguator: "ABR".into(),
+            source: "Abregado".into(),
             description: "Swamp canal city".into(),
-            modes: [vec![Mode::Con, Mode::Ctf], vec![Mode::Con, Mode::Ctf]],
+            modes: std::collections::BTreeMap::from([
+                (Era::Cw, vec![Mode::Con, Mode::Ctf]),
+                (Era::Gcw, vec![Mode::Con, Mode::Ctf]),
+            ]),
+            era_overrides: std::collections::BTreeMap::new(),
         },
         ModMapEntry {
+            stock_row: None,
             key: "mod_abr_v2__abr".into(),
             variant_keys: vec!["mod_abr_v2__abr".into()],
             legacy_code: "abr".into(),
             name: "Abregado-Rae: Venezia".into(),
             disambiguator: "ABR_v2".into(),
+            source: "Abregado".into(),
             description: "Remaster".into(),
-            modes: [vec![Mode::Ctf], vec![Mode::Ctf]],
+            modes: std::collections::BTreeMap::from([
+                (Era::Cw, vec![Mode::Ctf]),
+                (Era::Gcw, vec![Mode::Ctf]),
+            ]),
+            era_overrides: std::collections::BTreeMap::new(),
         },
     ];
     let bakes = vec![
@@ -1296,7 +1408,187 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
     let abr2 = list.iter().find(|m| m.key == "mod_abr_v2__abr").unwrap();
     assert_ne!(abr1.label, abr2.label);
     assert!(abr1.label.contains("(mod)"));
-    assert!(abr1.runnable(Mode::Ctf, Side::Era(Era::Gcw)));
-    assert!(abr1.runnable(Mode::Ctf, Side::Era(Era::Cw)));
-    assert!(abr1.runnable(Mode::Con, Side::Mixed(0)));
+    assert!(abr1.runnable(&Mode::Ctf, &Side::Era(Era::Gcw)));
+    assert!(abr1.runnable(&Mode::Ctf, &Side::Era(Era::Cw)));
+    assert!(abr1.runnable(&Mode::Con, &Side::Mixed(0)));
+}
+
+#[test]
+fn custom_era_override_replaces_name_and_icon() {
+    let mod_maps = vec![ModMapEntry {
+        stock_row: None,
+        key: "mod_rs__st7".into(),
+        variant_keys: vec!["mod_rs__st7".into()],
+        legacy_code: "st7".into(),
+        name: "Balmorra: Outpost".into(),
+        disambiguator: "RS".into(),
+        source: "Rising Son".into(),
+        description: "Imperial outpost".into(),
+        modes: std::collections::BTreeMap::from([(Era::Gcw, vec![Mode::Con])]),
+        era_overrides: std::collections::BTreeMap::from([(
+            Era::Gcw,
+            EraOverride {
+                name: Some("Dark Times".into()),
+                icon: Some("darktimes_icon".into()),
+            },
+        )]),
+    }];
+    let bakes = vec![("mod_rs__st7".to_owned(), "bf2".to_owned())];
+    let missions = |_: &str, mode: Mode| match mode {
+        Mode::Con => vec![["all".to_owned(), "imp".to_owned()]],
+        _ => Vec::new(),
+    };
+    let mut ia = InstantAction::new(
+        catalog_with_mods(&text, &bakes, &missions, &mod_maps),
+        IaTexts::new(&|_, e| e.to_owned()),
+        SessionOptions::default(),
+    );
+    let idx = ia.maps.iter().position(|m| m.key == "mod_rs__st7").unwrap();
+    ia.picked_map = MapPick::One(idx);
+    ia.picked_mode = ModePick::One(Mode::Con);
+    ia.state = State::Era;
+    let rows = ia.side_rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].text, "Dark Times");
+    assert_eq!(rows[0].icon.as_deref(), Some("darktimes_icon"));
+    assert_eq!(ia.info(), "Dark Times");
+    ia.step(cross(), 0.0);
+    assert_eq!(ia.play_rows()[1].icon2.as_deref(), Some("darktimes_icon"));
+}
+
+#[test]
+fn custom_eras_display_expand_and_launch() {
+    let era_k = Era::Custom("k".into());
+    let era_y = Era::Custom("y".into());
+    let era_q9 = Era::Custom("q9".into());
+    let mod_maps = vec![ModMapEntry {
+        stock_row: None,
+        key: "mod_tst__tst".into(),
+        variant_keys: vec!["mod_tst__tst".into()],
+        legacy_code: "tst".into(),
+        name: "Test World".into(),
+        disambiguator: "TST".into(),
+        source: "Test Mod".into(),
+        description: "Multi-era map".into(),
+        modes: std::collections::BTreeMap::from([
+            (Era::Gcw, vec![Mode::Con]),
+            (era_k.clone(), vec![Mode::Con]),
+            (era_y.clone(), vec![Mode::Con]),
+            (era_q9.clone(), vec![Mode::Con]),
+        ]),
+        era_overrides: std::collections::BTreeMap::from([(
+            era_y.clone(),
+            EraOverride {
+                name: Some("Vong War".into()),
+                icon: Some("custom_vong_icon".into()),
+            },
+        )]),
+    }];
+    let bakes = vec![("mod_tst__tst".to_owned(), "bf2".to_owned())];
+    let missions = |_: &str, mode: Mode| match mode {
+        Mode::Con => vec![["all".to_owned(), "imp".to_owned()]],
+        _ => Vec::new(),
+    };
+    let custom_era_missions = |_: &str, mode: Mode, era: &str| match (mode, era) {
+        (Mode::Con, "k") => vec![["rep".to_owned(), "cis".to_owned()]],
+        (Mode::Con, "y" | "q9") => vec![["all".to_owned(), "imp".to_owned()]],
+        _ => Vec::new(),
+    };
+    let maps = catalog_with_mods_and_eras(&text, &bakes, &missions, &custom_era_missions, &mod_maps);
+    let mut ia = InstantAction::new(
+        maps,
+        IaTexts::new(&|_, e| e.to_owned()),
+        SessionOptions::default(),
+    );
+    let idx = ia.maps.iter().position(|m| m.key == "mod_tst__tst").unwrap();
+    ia.picked_map = MapPick::One(idx);
+    ia.picked_mode = ModePick::One(Mode::Con);
+    ia.state = State::Era;
+
+    // Era rows: GCW, KotOR (v1.3 default), Era Q9 (honest fallback), Vong War (map override), All Eras.
+    let rows = ia.side_rows();
+    assert_eq!(rows.len(), 5);
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.text.as_str(), r.icon.as_deref(), r.enabled))
+            .collect::<Vec<_>>(),
+        vec![
+            ("Galactic Civil War", Some("imp_icon"), true),
+            ("KotOR", Some("kotor_icon"), true),
+            ("Era Q9", Some("imp_icon"), true),
+            ("Vong War", Some("custom_vong_icon"), true),
+            ("All Eras", None, true),
+        ]
+    );
+
+    // Selecting All Eras expands every era of the map, including custom eras.
+    ia.add(MapPick::One(idx), ModePick::One(Mode::Con), SidePick::AllEras);
+    let launched = ia.launch();
+    assert_eq!(launched.len(), 4);
+    assert_eq!(
+        launched
+            .iter()
+            .map(|l| (l.era.as_deref(), l.armies.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("gcw"), ["all".into(), "imp".into()]),
+            (Some("k"), ["rep".into(), "cis".into()]),
+            (Some("q9"), ["all".into(), "imp".into()]),
+            (Some("y"), ["all".into(), "imp".into()]),
+        ]
+    );
+    let play_rows = ia.play_rows();
+    let play_icons: Vec<Option<&str>> = play_rows
+        .iter()
+        .skip(1)
+        .map(|r| r.icon2.as_deref())
+        .collect();
+    assert_eq!(
+        play_icons,
+        vec![
+            Some("imp_icon"),
+            Some("kotor_icon"),
+            Some("imp_icon"),
+            Some("custom_vong_icon"),
+        ]
+    );
+}
+
+#[test]
+fn a_mods_modes_for_a_stock_map_join_that_maps_row() {
+    let era = Era::Custom("1".into());
+    let mod_maps = vec![ModMapEntry {
+        stock_row: Some("cor1".into()),
+        key: "mod_tst__cor1".into(),
+        variant_keys: vec!["mod_tst__cor1".into()],
+        legacy_code: "cor1".into(),
+        name: "Coruscant".into(),
+        disambiguator: "TST".into(),
+        source: "Test Mod".into(),
+        description: String::new(),
+        modes: std::collections::BTreeMap::from([(era.clone(), vec![Mode::Con])]),
+        era_overrides: std::collections::BTreeMap::from([(
+            era.clone(),
+            EraOverride {
+                name: Some("Later Era".into()),
+                icon: None,
+            },
+        )]),
+    }];
+    let bakes = vec![("cor1".to_owned(), "bf2".to_owned())];
+    let missions = |_: &str, _: Mode| Vec::new();
+    let custom = |key: &str, mode: Mode, code: &str| match (key, mode, code) {
+        ("mod_tst__cor1", Mode::Con, "1") => vec![["all".to_owned(), "imp".to_owned()]],
+        _ => Vec::new(),
+    };
+    let stock = catalog(&text, &bakes, &missions);
+    let maps = catalog_with_mods_and_eras(&text, &bakes, &missions, &custom, &mod_maps);
+
+    assert_eq!(maps.len(), stock.len(), "no row of the mod's own");
+    let row = maps.iter().find(|m| m.key == "cor1").unwrap();
+    let before = stock.iter().find(|m| m.key == "cor1").unwrap();
+    assert_eq!(row.label, before.label);
+    assert_eq!(row.modes_for(&Era::Gcw), before.modes_for(&Era::Gcw));
+    assert!(row.runnable(&Mode::Con, &Side::Era(era.clone())));
+    assert_eq!(row.era_overrides[&era].name.as_deref(), Some("Later Era"));
 }

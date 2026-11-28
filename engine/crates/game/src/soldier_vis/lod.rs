@@ -136,6 +136,7 @@ impl SoldierVisuals {
         game: &str,
         geometry: &str,
         asset: &crate::assets::SkinnedAsset,
+        fallback_groups: Option<&std::collections::BTreeMap<String, Vec<String>>>,
         cache: &mut std::collections::HashMap<String, Option<render::TextureHandle>>,
     ) -> (
         Option<manifest::SoldierLod>,
@@ -149,7 +150,16 @@ impl SoldierVisuals {
             .ok()
             .and_then(|text| ron::from_str(&text).ok());
         let low = lod.as_ref()
-            .and_then(|_: &manifest::SoldierLod| Self::load_body(r, root, game, &format!("{geometry}.low"), cache))
+            .and_then(|_: &manifest::SoldierLod| {
+                Self::load_body_with_fallback_groups(
+                    r,
+                    root,
+                    game,
+                    &format!("{geometry}.low"),
+                    fallback_groups,
+                    cache,
+                )
+            })
             .filter(|low| {
                 let matches = low.asset.skeleton.names == asset.skeleton.names
                     && low.asset.skeleton.global_bind == asset.skeleton.global_bind;

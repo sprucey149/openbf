@@ -4,11 +4,17 @@ use super::*;
 
 pub(super) fn mark(container: &Chunk<'_>, fields: &mut [ComboField]) -> Result<()> {
     let mut count = 0usize;
+    // A keyword the parse skipped has no field, and neither has its scope.
+    let mut skipped = false;
     for chunk in container.children() {
         let chunk = chunk?;
         match &chunk.tag {
-            b"DATA" => count += 1,
-            b"SCOP" => {
+            b"DATA" => {
+                let hash = chunk.payload.first_chunk().map(|b| u32::from_le_bytes(*b));
+                skipped = hash.is_some_and(|hash| super::keyword(hash).is_none());
+                count += usize::from(!skipped);
+            }
+            b"SCOP" if !skipped => {
                 let field = count
                     .checked_sub(1)
                     .and_then(|i| fields.get_mut(i))

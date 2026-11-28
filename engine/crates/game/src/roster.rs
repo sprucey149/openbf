@@ -749,9 +749,20 @@ pub fn weapon_model(db: &ClassDb, weapon: &str) -> Option<String> {
         .map(|g| g.trim().to_owned())
 }
 
+/// The class's `FirstPerson`, `<path>;<model>`, lowercase with `/`: the path
+/// tells two LVLs' same-named arms apart (`manifest::fpm::arms_path`).
 pub fn first_person_model(db: &ClassDb, class: &str) -> Option<String> {
-    let model = db.prop(class, "FirstPerson")?.rsplit(';').next()?.trim();
-    (!model.is_empty()).then(|| model.to_ascii_lowercase())
+    let value = db.prop(class, "FirstPerson")?.trim().trim_matches('"');
+    let (path, model) = value.rsplit_once(';').unwrap_or(("", value));
+    let model = model.trim().to_ascii_lowercase();
+    let path = path.trim().replace('\\', "/").to_ascii_lowercase();
+    (!model.is_empty()).then(|| {
+        if path.is_empty() {
+            model
+        } else {
+            format!("{path};{model}")
+        }
+    })
 }
 
 pub fn first_person_weapon(
@@ -759,10 +770,17 @@ pub fn first_person_weapon(
     weapon: &str,
     offhand: bool,
 ) -> crate::first_person::FpWeapon {
-    let geometry = db
-        .prop(weapon, "HighResGeometry")
-        .map(|g| g.trim().to_ascii_lowercase())
-        .filter(|g| !g.is_empty());
+    let model = |key| {
+        db.prop(weapon, key)
+            .map(|g| g.trim().to_ascii_lowercase())
+            .filter(|g| !g.is_empty())
+    };
+    // BF2 draws a weapon with no `HighResGeometry` (class+0x78) with its
+    // `GeometryName` (+0x74) in first person too (`FUN_0032b228`,
+    // `FUN_0033e018`). Every soldier weapon on the discs names one; a mod's
+    // may not.
+    let geometry =
+        model("HighResGeometry").or_else(|| db.is_bf2().then(|| model("GeometryName")).flatten());
     let bank = db
         .prop(weapon, "AnimationBank")
         .and_then(|v| v.split_whitespace().next().map(str::to_ascii_lowercase));

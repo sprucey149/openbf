@@ -65,7 +65,11 @@ pub(super) fn arguments(field: &ComboField) -> Result<()> {
             strings(field, 2)?;
         }
         K::Sound => {
-            text(field, 0)?;
+            // Some mod combo chunks author `Sound("")` to silence a state;
+            // core::combo ignores an empty sound name at runtime.
+            if field.text(0).is_none() {
+                bail!("{:?} argument 0 needs a string", field.keyword);
+            }
             if field.args.len() > 1 {
                 number(field, 1)?;
             }

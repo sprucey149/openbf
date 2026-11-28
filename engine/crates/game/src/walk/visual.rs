@@ -240,6 +240,9 @@ impl ClassVisual {
 pub struct TeamTemplate {
     /// Faction key for the HUD ("all" | "imp" | "rep" | "cis" | "team").
     pub faction: String,
+    /// Optional custom team display name from v1.3 `SupportsCustomEraTeams` /
+    /// `CustomEraTeam1` / `CustomEraTeam2`.
+    pub display_name: Option<String>,
     pub name: String,
     pub consts: core::soldier::SoldierConstants,
     pub max_health: f32,
@@ -276,6 +279,7 @@ impl TeamTemplate {
         let c = roster.fill_class();
         Self {
             faction: roster.faction.clone(),
+            display_name: None,
             name: c.class.clone(),
             consts: c.consts,
             max_health: c.max_health,
@@ -295,6 +299,7 @@ impl TeamTemplate {
     pub fn default_trooper() -> Self {
         Self {
             faction: "team".into(),
+            display_name: None,
             name: "trooper".into(),
             consts: core::soldier::SoldierConstants::default(),
             max_health: 300.0,

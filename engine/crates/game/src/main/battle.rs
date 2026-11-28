@@ -234,8 +234,18 @@ fn team_templates(
                     visuals.push(game::walk::ClassVisual::from_roster_with_held(c));
                 }
                 sim.classes[team] = table;
+                let idx = team;
                 team += 1;
-                game::walk::TeamTemplate::from_roster(&r, &sim.classes[team - 1][0], visuals)
+                let mut tmpl =
+                    game::walk::TeamTemplate::from_roster(&r, &sim.classes[idx][0], visuals);
+                if let Some(names) = b
+                    .mission
+                    .as_ref()
+                    .and_then(|m| m.custom_team_names.as_ref())
+                {
+                    tmpl.display_name = Some(names[idx].clone());
+                }
+                tmpl
             });
             if let Some(mut rules) = b
                 .heroes
@@ -283,7 +293,11 @@ fn team_templates(
 /// screens stand over the mission's camera shots until the first spawn (card SSELB,
 /// `game::spawn_backdrop`).
 pub(super) fn open_spawn_screens(walk: &mut WalkSim, mission: Option<&game::mission::MissionDef>) {
-    let side_choice = mission.map_or(true, |m| m.allows_side_select());
+    let side_choice = walk
+        .campaign
+        .as_ref()
+        .and_then(|c| c.can_switch_sides())
+        .unwrap_or_else(|| mission.map_or(true, |m| m.allows_side_select()));
     if !walk.sim.open_spawn_screens(0, side_choice) {
         eprintln!("spawn screens: slot 0 holds no live unit; the respawn stays automatic");
         return;
@@ -303,7 +317,11 @@ pub(super) fn seat_local_players(
     players: usize,
     mission: Option<&game::mission::MissionDef>,
 ) {
-    let side_choice = mission.map_or(true, |m| m.allows_side_select());
+    let side_choice = walk
+        .campaign
+        .as_ref()
+        .and_then(|c| c.can_switch_sides())
+        .unwrap_or_else(|| mission.map_or(true, |m| m.allows_side_select()));
     for slot in 1..players.min(4) as u8 {
         if let Err(e) = walk.add_local_player(slot, None) {
             eprintln!("splitscreen: player slot {slot} could not be seated: {e:?}");
@@ -487,6 +505,7 @@ pub(super) fn make_walk_with_counts(
             .map(|n| core::sim::scale_reinforcements(n, b.ticket_pct))
     };
     sim.battle = core::battle::Battle::new(tickets);
+    sim.battle.script_rules = b.mission.as_ref().is_some_and(|m| m.script.is_some());
     if let Some(c) = b.mission.as_ref().and_then(|m| m.campaign.as_ref()) {
         use core::fmath::FloatExt;
         sim.battle.campaign_rules = true;
@@ -607,7 +626,7 @@ pub(super) fn make_walk_with_counts(
     let mut layout = game::layout::MapLayout::from_mission_manifest_mode(
         &scene.manifest,
         hunt,
-        b.mission.as_ref().is_some_and(|m| m.is_campaign()),
+        b.mission.as_ref().is_some_and(|m| m.has_script()),
         b.mission.as_ref().is_some_and(|m| m.is_ctf()),
     );
     if let Some(m) = b.mission.as_ref().filter(|m| m.is_hunt()) {
@@ -666,7 +685,7 @@ pub(super) fn make_walk_with_counts(
     }
     if let Some(counts) = ai_counts {
         walk.add_posts(&layout);
-        let saved_cp_owners = if let Some(m) = b.mission.as_ref().filter(|m| m.is_campaign()) {
+        let saved_cp_owners = if let Some(m) = b.mission.as_ref().filter(|m| m.has_script()) {
             game::campaign_runtime::CampaignRuntime::kill_startup_posts(&mut walk.sim, &m.killed)
         } else {
             Vec::new()
@@ -746,6 +765,24 @@ pub(super) fn make_walk_with_counts(
         }
         if let Some(m) = &b.mission {
             walk.particle_lod_bias = m.particle_lod_bias.unwrap_or(0.0);
+            if !m.class_properties.is_empty() {
+                let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
+                    walk.teams[t]
+                        .classes
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect()
+                });
+                for (cls, prop, val) in &m.class_properties {
+                    game::campaign_runtime::apply_class_property(
+                        &mut walk.sim,
+                        &team_classes,
+                        cls,
+                        prop,
+                        val,
+                    );
+                }
+            }
             for t in 0..2usize {
                 walk.sim
                     .set_ai_spawn_allowed(t as u8, m.teams[t].allows_ai_spawn_initially());
@@ -778,7 +815,15 @@ pub(super) fn make_walk_with_counts(
                 m,
                 &scene.manifest,
             );
-            if let Some(spec) = m.campaign.clone() {
+            let script_spec = m.campaign.clone().or_else(|| {
+                m.script.clone().map(|script| {
+                    let mut spec = game::mission::CampaignMissionDef::default();
+                    spec.script = Some(script);
+                    spec.libs = m.loaded_script_libs.clone();
+                    spec
+                })
+            });
+            if let Some(spec) = script_spec {
                 let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
                     walk.teams[t]
                         .classes
@@ -794,7 +839,16 @@ pub(super) fn make_walk_with_counts(
                     saved_cp_owners,
                     &walk.sim,
                 );
-                rt.set_team_rosters(team_classes, [0, 0]);
+                rt.set_is_campaign(m.is_campaign());
+                rt.set_script_setup(m.script_setup);
+                rt.set_team_rosters(
+                    team_classes,
+                    if m.is_campaign() {
+                        [0, 0]
+                    } else {
+                        [m.teams[0].units, m.teams[1].units]
+                    },
+                );
                 rt.set_team_factions([
                     walk.teams[0].faction.as_str(),
                     walk.teams[1].faction.as_str(),
@@ -811,6 +865,21 @@ pub(super) fn make_walk_with_counts(
                 );
                 rt.load_world_anims(&scene.dir, &scene.manifest, &walk.sim);
                 rt.start(&mut walk.sim);
+                // The third teams the script filled while it ran (a hero it
+                // picked at random) join once their classes are known.
+                let requested = rt.take_native_requests();
+                if m.script.is_some() && !requested.is_empty() {
+                    let mut with = m.clone();
+                    with.local_teams = requested;
+                    game::native_teams::install(
+                        &mut walk,
+                        &layout,
+                        &b.classes_dir,
+                        assets_dir,
+                        &with,
+                        &scene.manifest,
+                    );
+                }
                 // ScriptPostLoad requests the same opening clip played by the
                 // campaign shell before loading the battle.
                 rt.take_movies();
@@ -838,7 +907,7 @@ pub(super) fn make_walk_with_counts(
         // Campaigns with spawn screens defer their opening AI wave until the
         // human player spawns so `onfirstspawn` (e.g. Kamino switching Team 1
         // from `boba` to `cp5`) updates CP ownership before allies spawn.
-        let opening_counts = if walk.campaign.is_some() {
+        let opening_counts = if b.mission.as_ref().is_some_and(|m| m.is_campaign()) {
             [0, 0]
         } else {
             counts
@@ -1397,7 +1466,16 @@ pub(super) fn hud_model_for_view(
         (on_foot || droid.is_some() || guided.is_some() || game::hud_feed::armed_seat(walk))
             .then(|| game::hud_feed::reticle_relation(&walk.sim, slot));
     ui::hud::HudModel {
-        team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
+        team_names: [
+            walk.teams[0]
+                .display_name
+                .clone()
+                .unwrap_or_else(|| walk.teams[0].faction.clone()),
+            walk.teams[1]
+                .display_name
+                .clone()
+                .unwrap_or_else(|| walk.teams[1].faction.clone()),
+        ],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
         unlimited_tickets: [0, 1].map(|t| b.unlimited_reinforcements || b.unlimited_teams[t]),
         popup: walk.campaign.as_ref().and_then(|c| c.popup()).map(|p| {
@@ -1483,12 +1561,16 @@ pub(super) fn hud_model_for_view(
                         .map(|(points, limits)| (points.map(|p| p as i32), limits))
                 }),
         },
-        ctf: walk.sim.ctf.is_some() && walk.campaign.is_none(),
+        ctf: (walk.sim.ctf.is_some() && walk.campaign.is_none())
+            || walk.campaign.as_ref().is_some_and(|c| c.flag_ctf_hud()),
         flag_status: walk
             .sim
             .ctf
             .as_ref()
-            .filter(|_| walk.campaign.is_none())
+            .filter(|_| {
+                walk.campaign.is_none()
+                    || walk.campaign.as_ref().is_some_and(|c| c.flag_ctf_hud())
+            })
             .and_then(|c| {
                 if c.mode == core::sim::CtfMode::OneFlag {
                     c.flags.first().and_then(|flag| match flag.status {
@@ -1549,14 +1631,11 @@ pub(super) fn hud_model_for_view(
             .domination_left()
             .map(|(holder, secs)| (holder == me.team, secs)),
         round_end: walk.round_end.as_ref().map(round_end_model),
-        // Only the round's own time limit draws a countdown. The campaign's
-        // `ShowTimer` objectives have no HUD timer in the original - the egui
-        // panel was a port addition that rendered badly over the battle - so
-        // mission timers stay off the HUD.
         time_left: walk.sim.time_limit.map(|l| {
             (u64::from(l) * u64::from(core::TICK_HZ)).saturating_sub(walk.sim.tick) as f32
                 / core::TICK_HZ as f32
         }),
+        objective_timer: walk.campaign.as_ref().and_then(|c| c.time_left()),
         messages: feed.take(),
         ambush: feed.take_ambush(),
         damage_flash: feed.damage_flash(walk.sim.tick, walk.player),
@@ -1744,7 +1823,16 @@ pub(super) fn spawn_model(
     let choice = walk.sim.spawn_class_choice(slot, me.team);
     let names = feed.class_names(me.team);
     Some(ui::spawn::SpawnModel {
-        team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
+        team_names: [
+            walk.teams[0]
+                .display_name
+                .clone()
+                .unwrap_or_else(|| walk.teams[0].faction.clone()),
+            walk.teams[1]
+                .display_name
+                .clone()
+                .unwrap_or_else(|| walk.teams[1].faction.clone()),
+        ],
         player_team: me.team,
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
         posts,

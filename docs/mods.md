@@ -25,13 +25,13 @@ The filesystem is the single source of truth:
        MyWorldRetex/                   # single loose replacement LVL
          end1.lvl
      mod_cache/          # auto-generated native assets (safe to delete anytime)
-     mod_targets.ron     # optional persistent target choices for ambiguous LVLs
+     mod_targets.ron     # optional hand-written targets for ambiguous LVLs
      stock_sources.ron   # stock copy paths synced from launcher.ron
      extensions.ron      # persistent enabled states + load order (schema v2)
    ```
 
 3. Return to the launcher (or click **Refresh**): the launcher automatically re-scans `openbf_data/mods/` on startup and window focus regain.
-4. Enable the mod, arrange its priority with **Up** / **Down**, resolve any ambiguous LVL target prompt if shown, wait for automatic background preparation into `openbf_data/mod_cache/`, and click **Play**.
+4. Enable the mod, arrange its priority with **Up** / **Down**, wait for automatic background preparation into `openbf_data/mod_cache/`, and click **Play**.
 
 Direct launches of `openbf` without opening the launcher first also read `openbf_data/extensions.ron` and `openbf_data/mods/`, preparing missing or stale caches automatically via `bake mod-convert` when `bake` is available. Pass `--no-mods` to suppress all content mods for a launch.
 
@@ -41,6 +41,9 @@ Direct launches of `openbf` without opening the launcher first also read `openbf
 
 - **No untrusted code execution:** Discovery and mission inspection use static `ucfb` LVL scanning and a bounded static Lua 5.0 bytecode constant/opcode evaluator (`mungefs::lua50`)—arbitrary mod scripts or third-party native DLLs are never executed.
 - **Stable non-colliding identities:** Each discovered folder gets an internal mod ID (`content.<slug>`) and isolated asset/mission namespace (`mod_<slug>`) derived from the installed folder identity rather than the legacy three-character addon tag alone. Multiple mods sharing the same legacy tag (for example, `MAP_A` and `MAP_B`) remain distinct in the list, in `mod_cache/`, and in Instant Action with folder-name disambiguation.
+- **Map folders:** With **Map folders** on in the launcher's options, Instant Action lists its maps in folders: Battlefront 1, Battlefront 2, then one per mod that adds a map, named as the mod. Map names drop the `(bf1)`, `(bf2)` and `(mod)` suffixes. **All Maps** inside a folder means that folder's maps. The setting reaches the game through `OPENBF_GROUP_MAPS`, and the multiplayer lobby keeps the flat list.
+- **Game-folder downloads:** A mod laid out as the game folder it is copied over (`GameData/addon/<ID>/...`, with or without the `GameData` folder) is one entry in the **Mods** tab. Each addon inside it is read on its own, and the folder's `data/_LVL_PC` files are replacement candidates.
+- **Map names:** A map is named as the game names it: `mapname.name.` plus the longest start of the mission script's name that the addon's `core.lvl` has a string for (`rxc1_con`: `rxc1_`, `rxc1`, `rxc`, ...).
 - **Compatibility classification:** Each mod is marked **Supported**, **Supported (warnings)**, **Unsupported**, or **Invalid** (for example rejected symlink escapes or corrupt/empty folders) with expandable diagnostics inside the **Mods** tab.
 - **Stock protection:** Unreferenced top-level LVLs placed inside an addon folder (for instance stray copies of stock map LVLs bundled inside an addon) are detected, left unmounted with a warning, and never allowed to shadow stock maps accidentally.
 
@@ -62,7 +65,7 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 ## 4. Automatic Conversion Cache & Runtime Architecture
 
 - **Versioned cache (`openbf_data/mod_cache/<namespace>/`):** Background conversion (`bake mod-convert`) emits native GLB geometry/collision, KTX2 textures, `manifest.ron`, `classes.ron`, `effects.ron`, `foliage.bin`, translated `missions/*.ron`, optional `locl.ron`, replacement overrides under `overrides/assets/`, and `cache_meta.ron` (recording `schema_version`, the `converter` id, SHA-256 source fingerprint, replacement key, catalog digest, and user target choices).
-- **Zero source mutation & incremental rebuilds:** Source mod files in `openbf_data/mods/` are strictly read-only. Re-launches reuse cached native assets when metadata matches and automatically rebuild only the affected mod when its source files, target selections, stock catalog, or converter version change—never rebuilding stock `assets_baked/` or repacking `openbf.pak`.
+- **Zero source mutation & incremental rebuilds:** Source mod files in `openbf_data/mods/` are strictly read-only. Re-launches reuse cached native assets when metadata matches and automatically rebuild only the affected mod when its source files, target selections, stock catalog, or converter version change—never rebuilding stock `assets_baked/` or repacking `openbf.pak`. A rebuild keeps the converted maps, units and replacements that would come out the same: after an openbf update that changed only how missions and menus are read, it takes seconds. An update that changed asset conversion, or a change to the mod itself, converts them all again.
 - **Clean dependency boundary:** `game` never links `mungefs` in normal dependencies. `game::mods_runtime` loads enabled caches directly via `extensions` + `manifest` + `pak::overlay` (spawning external `bake mod-convert` only when a cache needs creation or refresh).
 - **Checkout and packed compatibility:** `pak::overlay` layers namespaced mod directories (`NamespaceDir`), mission prefixes (`NamespacePrefix`), and game-scoped priority-ordered overrides (`Overrides`) uniformly over both development checkouts (`assets_baked/`, `missions/`) and packed retail builds (`openbf.pak`).
 
@@ -77,14 +80,19 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 ### Supported Out of the Box
 
 - Conventional PC `_LVL_PC` addon maps referencing stock BF2 sides, classes, weapons, vehicles, and planet sound banks.
-- Standard `addme.script` + `mission.lvl` mission scripts (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`), including multi-variant single-player world selection with fixed multiplayer branches.
+- Standard `addme.script` + `mission.lvl` mission scripts (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`) as well as mod-declared custom game modes (translated to action-tree IR) and custom v1.3 eras (`era_<code>`, `mode_<mode>_<code>`, `change` name/icon overrides, v1.3 built-in era defaults, and `SupportsCustomEraTeams` / `CustomEraTeam1` / `CustomEraTeam2` side labels), including multi-variant single-player world selection with fixed multiplayer branches.
 - PC `tern` terrain (with PC directional lighting), PC DXT1/DXT3/DXT5/A8R8G8B8 textures, PC `V8U8` normal-mapped water, PC bump and glossmap specular materials (`MTRL` 0x20 / 0x08, specular cube from a PC BF2 `core.lvl`), static collision meshes, world instances/regions/layers, `plan`/`plnp` nav graphs, `core.lvl` localized text tables, addon load screens, and addon sound banks with stock CORE template inheritance.
+- Soldiers, weapons, vehicles, particle effects and bolt textures from an addon map's own side LVLs, with their classes and textures, including a hero a mission script picks while it runs for a third team.
+- A script that draws its troops at random during setup (for example uniforms of another period): each draw is its own roster, picked per round with the script's odds. A LAN round takes the script's multiplayer branch.
 - Generic stock LVL replacements for playable `side/*.lvl` files (class patches, soldiers, weapons, vehicles, side effects, textures), `fpm/...` first-person arm LVLs, stock world LVLs (both texture-only fast path and full world re-bake), and `load/<map>.lvl` load screens.
+- Missions on the game's own maps. A mission that reads a stock world (`cor\cor1.lvl`), with or without the mod's own layers on top, is converted into a world of its own, and the stock map is not changed. Its modes and eras join that map's row in the Instant Action list, as the mod's menu script adds them in the game; only maps the game does not ship get rows of their own. The stock world is read from your PC copy of Battlefront II, so set it in the launcher; without it these missions are skipped with a warning.
+- Only missions the mod puts in the game's menu lists are offered. A script the mod only makes loadable (`AddDownloadableContent`) has no menu entry in the game either, and is skipped with a warning.
+- A translated mode script decides its own round: reinforcements are paid and the winner is called the way the script says, not by the engine's conquest rules.
 
 ### Not Supported / Skipped with Diagnostics
 
-- Arbitrary runtime Lua mission logic outside supported declarative tables and closed world-event actions.
+- Arbitrary runtime Lua mission logic outside supported declarative tables, translated mode scripts, and closed world-event actions (a mission script whose custom mode cannot be translated is reported as unsupported).
 - Custom third-party native DLL plugins.
-- Full custom non-stock side LVL model/texture/animation authoring inside addon maps.
+- Vehicle sounds, unit sounds and voice lines, some first-person arms and custom animation banks from an addon map's own side LVLs.
 - Dynamic BF2 `CLTH` cloth simulation (deferred engine-wide under `CLOTH2`; rigid flagpoles and worn cloth render without cloth physics).
 - Menu shell side LVLs (`side/*shell.lvl`), PC 1.1 `GeometryAddon` attachments, 3D starfighter cockpit FPM models, normal maps on materials without the PC bump flag, custom `zaf_`/`zaa_` animation banks, and unsupported skinned MTRL blend modes.

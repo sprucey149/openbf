@@ -591,6 +591,7 @@ fn typography_captures() {
     egui_shot("egui_hud_lines", &|ctx| {
         let m = ui::hud::HudModel {
             time_left: Some(312.0),
+            objective_timer: None,
             outcome: Some(0),
             team_names: ["rep".into(), "cis".into()],
             ..Default::default()

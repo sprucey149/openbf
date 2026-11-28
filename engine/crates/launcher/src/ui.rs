@@ -7,6 +7,7 @@ use crate::config::{GraphicsApi, LauncherConfig, Platform, SourceConfig};
 use crate::mods_worker::{ModsSnapshot, ModsWorker};
 use crate::paths::{open_folder, LauncherPaths};
 use crate::runner::{is_error_line, BuildHandle, BuildOutcome, BuildProgress};
+use crate::ui_mods::card_text;
 use egui::{
     Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame, Id,
     Layout, Margin, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
@@ -617,6 +618,29 @@ impl LauncherApp {
                 egui::RichText::new("Optional DLC_XBOX folder (Kit Fisto & Asajj Ventress)")
                     .font(regular_font(12.0))
                     .color(TEXT_MUTED),
+            );
+        });
+
+        ui.add_space(21.0);
+
+        // Instant Action map folders row.
+        ui.horizontal(|ui| {
+            row_label(ui, "Map folders", 104.0);
+            let enabled = self.config.group_maps_by_source;
+            if extension_toggle(ui, "group_maps_by_source", enabled, true) {
+                self.config.group_maps_by_source = !enabled;
+                changed = true;
+            }
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add_space(112.0);
+            ui.label(
+                egui::RichText::new(
+                    "Group Instant Action maps by Battlefront 1, Battlefront 2 and each mod",
+                )
+                .font(regular_font(12.0))
+                .color(TEXT_MUTED),
             );
         });
 
@@ -1492,7 +1516,8 @@ pub(crate) fn draw_notice_box(
         .show(ui, |ui| {
             // 10px left + 10px right inner margin + 1px left + 1px right stroke = 22px.
             ui.set_width((width - 22.0).max(140.0));
-            ui.add(
+            card_text(
+                ui,
                 egui::Label::new(
                     egui::RichText::new(text)
                         .font(regular_font(12.0))

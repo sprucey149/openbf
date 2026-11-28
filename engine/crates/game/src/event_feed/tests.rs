@@ -1717,3 +1717,10 @@ fn mod_locl_tables_resolve_in_priority_order_and_clear() {
     assert_eq!(cleared.post_name("level.abr.cp1"), "Command Post");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn hero_assault_sides_read_the_plural_text_keys() {
+    assert_eq!(super::side_key("hero"), "heroes");
+    assert_eq!(super::side_key("Villain"), "villains");
+    assert_eq!(super::side_key("imp"), "imp");
+}

@@ -63,7 +63,7 @@ fn add(ia: &mut InstantAction, key: &str) {
     ia.add(
         MapPick::One(i),
         ModePick::One(Mode::Con),
-        SidePick::One(Side::Era(ERAS[0])),
+        SidePick::One(Side::Era(ERAS[0].clone())),
     );
     assert!(ia.playlist.len() > before, "{key} adds a row");
 }
@@ -308,6 +308,7 @@ fn next_playable_row_skips_what_a_later_joiner_lacks() {
         game: ui::shell::Game::Bf2,
         mode: Mode::Con,
         armies: ["rep".into(), "cis".into()],
+        era: Some("cw".into()),
         label: key.to_uppercase(),
     };
     let mut playlist: std::collections::VecDeque<_> =

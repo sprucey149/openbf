@@ -506,6 +506,19 @@ impl Sim {
                     (v.health.shield + dt * v.add_shield).clamp(0.0, v.health.shield_max);
             }
         }
+        for u in &mut self.units {
+            if !u.alive {
+                continue;
+            }
+            if u.consts.add_shield != 0.0 && u.health.shield_max > 0.0 {
+                u.health.shield =
+                    (u.health.shield + dt * u.consts.add_shield).clamp(0.0, u.health.shield_max);
+            }
+            if u.consts.add_health != 0.0 && u.health.cur > 0.0 {
+                u.health.cur =
+                    (u.health.cur + dt * u.consts.add_health).clamp(1.0, u.health.max);
+            }
+        }
     }
 
     /// Step 5c': every station's clock, and the passes that come due.

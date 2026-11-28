@@ -485,6 +485,8 @@ enum Screen {
     Lobby,
 }
 
+#[path = "windowed/boot.rs"]
+mod boot;
 #[path = "windowed/loading.rs"]
 mod loading;
 use loading::Loading;
@@ -660,6 +662,8 @@ impl SpawnClickTracker {
 }
 
 struct App {
+    /// The mods the shell still has to mount (`boot`).
+    mod_boot: Option<boot::ModBoot>,
     /// Direct launch target (--map); None = started in the shell.
     map: Option<PathBuf>,
     screen: Screen,
@@ -1236,6 +1240,7 @@ impl App {
             last: std::time::Instant::now(),
             close_pending: None,
             closing: false,
+            mod_boot: None,
         }
     }
 
@@ -1581,6 +1586,7 @@ impl App {
             &row.key,
             &mode,
             &row.armies,
+            row.era.as_deref(),
             42u32.wrapping_add(self.profile.career.rounds),
             false,
         );
@@ -1605,6 +1611,7 @@ impl App {
                 || ["all".to_owned(), "imp".to_owned()],
                 |r| r.armies.clone(),
             ),
+            era: row.and_then(|r| r.era.clone()),
             session: self.session,
             seed: 42u32.wrapping_add(self.profile.career.rounds),
             difficulty: self.profile.settings.difficulty,
@@ -2331,6 +2338,7 @@ impl App {
                 name,
                 &self.mode,
                 &row_armies,
+                self.current.as_ref().and_then(|r| r.era.as_deref()),
                 &self.session,
                 42u32.wrapping_add(self.profile.career.rounds),
                 self.profile.settings.difficulty,
@@ -2976,6 +2984,7 @@ pub(super) fn run_shell(
     assets_dir: PathBuf,
     missions_dir: PathBuf,
     resolved: ResolvedStartup,
+    no_mods: bool,
 ) -> Result<()> {
     let hud_file = assets_dir.join("common_bf2/hud/1playerhud.ron");
     if !pak::is_file(&hud_file) {
@@ -2985,6 +2994,7 @@ pub(super) fn run_shell(
         anyhow::bail!("{msg}");
     }
     let (event_loop, mut app) = shell_app(assets_dir, missions_dir)?;
+    app.mod_boot = Some(boot::ModBoot::Pending { no_mods });
     app.data_dir = resolved.data_dir;
     app.display_ext_meta = resolved.display_ext_meta;
     app.early_display = resolved.early_display;

@@ -528,6 +528,7 @@ impl NetplaySession {
             session,
             profile,
         );
+        setup.era = row.era.clone();
         setup.difficulty = game::shell_ia::port_difficulty(session.difficulty);
         setup.playlist_pos = pos;
         self.seat_humans(setup, profile)
@@ -590,6 +591,7 @@ impl NetplaySession {
             &setup.map,
             &setup.mode,
             &setup.armies,
+            setup.era.as_deref(),
             setup.seed,
             true,
         );

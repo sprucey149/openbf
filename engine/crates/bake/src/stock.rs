@@ -96,6 +96,22 @@ impl StockAssets {
         }
     }
 
+    /// What tells one stock bake from another: the archive file's length and
+    /// time of writing. `None` for a directory, whose files may change at any
+    /// time.
+    pub fn identity(path: &Path) -> Option<String> {
+        if !path.is_file() {
+            return None;
+        }
+        let file = match pak::Archive::open(path) {
+            Ok(Some(_)) => path.to_path_buf(),
+            _ => path.with_file_name(pak::PAK_NAME),
+        };
+        let meta = std::fs::metadata(&file).ok()?;
+        let written = extensions::mods::fingerprint::mtime_ns(&meta);
+        Some(format!("{} {} {written}", file.display(), meta.len()))
+    }
+
     pub fn catalogs(&self) -> extensions::mods::catalog::StockCatalogs {
         extensions::mods::catalog::StockCatalogs::load_with(&|rel| self.read(rel))
     }
@@ -110,7 +126,7 @@ pub struct StockSource {
 }
 
 /// Every stock copy the player configured, as `game:platform=path` pairs.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct StockSources {
     pub sources: Vec<StockSource>,
 }

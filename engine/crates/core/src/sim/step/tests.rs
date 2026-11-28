@@ -1667,6 +1667,36 @@ fn the_first_person_eye_and_aim_are_the_ps2s() {
 }
 
 #[test]
+fn a_melee_weapon_in_either_channel_holds_the_view_in_third_person() {
+    let mut s = zoom_sim(GroundRules::Bf2);
+    let rifle = s.units[0].weapon_class;
+    let mut class = s.weapon_classes[rifle].clone();
+    class.melee_class = true;
+    let blade = s.add_weapon_class(class);
+
+    s.units[0].weapon_class = blade;
+    s.step(&[pad(buttons::FIRST_PERSON)]);
+    assert!(!s.units[0].first_person);
+
+    // Back to the gun: the held preference takes effect again.
+    s.units[0].weapon_class = rifle;
+    s.step(&[pad(buttons::FIRST_PERSON)]);
+    assert!(s.units[0].first_person);
+
+    // The other channel's weapon counts, though it is not in hand.
+    let state = s.units[0].weapon.clone();
+    s.units[0].held.push(crate::unit::HeldWeapon {
+        slot: 7,
+        channel: 1,
+        class: blade,
+        state,
+    });
+    s.units[0].cur1 = Some(s.units[0].held.len() as u8 - 1);
+    s.step(&[pad(buttons::FIRST_PERSON)]);
+    assert!(!s.units[0].first_person);
+}
+
+#[test]
 fn a_thrown_or_dead_soldier_leaves_first_person() {
     use crate::soldier::Stance;
     let mut s = zoom_sim(GroundRules::Bf2);

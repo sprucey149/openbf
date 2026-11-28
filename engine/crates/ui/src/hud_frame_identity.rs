@@ -424,12 +424,13 @@ pub(crate) fn small_map() -> MapModel {
 }
 
 /// The digests the code made before `Frame` (private `main` at `26530897a`),
-/// per [`SIZES`] entry.
+/// per [`SIZES`] entry; taken again when the tree took the scene's one draw
+/// list, which reordered these frames' triangles and changed none of them.
 const PINS: [u64; 4] = [
-    0x1bca_0504_6509_1054,
-    0x2df6_87cf_f130_d945,
-    0x22ce_61a8_a913_5fe5,
-    0xb115_2995_ab35_b80e,
+    0xa63f_a0f5_96ba_d608,
+    0x47e3_acb2_0f4f_a5a7,
+    0x6c0b_56ed_bd37_23eb,
+    0x0d95_b43f_9407_1123,
 ];
 
 /// The single view draws and hit-tests exactly as before, a window narrower

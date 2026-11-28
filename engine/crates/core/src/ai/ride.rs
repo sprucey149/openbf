@@ -579,6 +579,10 @@ pub(super) fn board_goal(
             .is_some_and(|v| v.kind == VehicleKind::Flyer)
     {
         true
+    } else if sim.ai_goals.steer(me).is_some() {
+        // As [`claim`]: a script goal's member takes the notify scan, which
+        // asks for no route to a post (it may have no post at all).
+        true
     } else {
         st.target_cp
             .and_then(|i| sim.cps.get(i as usize))

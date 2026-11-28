@@ -29,6 +29,9 @@ pub use resolve::{
 /// `bake` is built from (`build.rs`), so a cache from any other converter
 /// reads as stale on its own. [`ModCacheMeta::converter`].
 pub const MOD_CONVERTER_ID: &str = include_str!(concat!(env!("OUT_DIR"), "/converter_id"));
+/// [`MOD_CONVERTER_ID`] without the mission and menu logic: while it holds,
+/// a new converter keeps a stale cache's baked assets (`bake::mods::assets`).
+pub const MOD_ASSET_ID: &str = include_str!(concat!(env!("OUT_DIR"), "/asset_id"));
 pub const MOD_CACHE_SCHEMA_VERSION: u32 = 1;
 
 /// The `bake` subcommand that prints the [`MOD_CONVERTER_ID`] it writes.
@@ -192,6 +195,10 @@ pub struct ModMissionSummary {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModMapSummary {
+    /// The stock map (`cor1`) on whose Instant Action row these missions are
+    /// listed, for modes and eras the mod adds to one of the game's maps.
+    #[serde(default)]
+    pub stock_row: Option<String>,
     pub map_key: String,
     pub legacy_code: String,
     pub display_name: String,
@@ -205,10 +212,27 @@ pub struct ModMapSummary {
     pub modes_cw: Vec<String>,
     #[serde(default)]
     pub modes_gcw: Vec<String>,
+    /// Supported modes for mod-declared custom eras, keyed by lowercase era code
+    /// (excluding `"cw"` and `"gcw"`).
+    #[serde(default)]
+    pub modes_custom_eras: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub missions: Vec<ModMissionSummary>,
     #[serde(default)]
     pub sound_planets: Vec<String>,
+    /// Optional custom era display overrides keyed by canonical era code
+    /// (`"cw"`, `"gcw"`, or custom era code) from `addme.script` `change.era_*`.
+    #[serde(default)]
+    pub era_overrides: BTreeMap<String, ModEraMeta>,
+}
+
+/// Optional display metadata for a mod-declared era (from `addme.script` `change.era_*`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModEraMeta {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -266,7 +290,7 @@ impl DiscoveredMod {
     }
 
     pub fn ambiguous_ops(&self) -> impl Iterator<Item = &ResourceOp> {
-        self.resource_ops.iter().filter(|o| o.status.needs_user())
+        self.resource_ops.iter().filter(|o| o.status.is_ambiguous())
     }
 
     pub fn changes_gameplay(&self) -> bool {
@@ -339,6 +363,24 @@ pub struct ModCacheMeta {
     /// ([`replace::TargetSelections::for_mod`]).
     #[serde(default)]
     pub target_choices: BTreeMap<String, TargetChoice>,
+    /// Custom game mode metadata extracted from `addme.script` (`change.mode_*` tables),
+    /// keyed by lowercase mode suffix (e.g. `"ins"` -> V.I.P., `"vip_icon"`).
+    #[serde(default)]
+    pub custom_modes: BTreeMap<String, ModModeMeta>,
+    /// True when shell/mode icon KTX2s were baked into `assets/<namespace>__shell_icons/`.
+    #[serde(default)]
+    pub has_shell_icons: bool,
+}
+
+/// Optional display metadata for a mod-declared game mode (from `addme.script`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModModeMeta {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 impl ModCacheMeta {
@@ -725,6 +767,8 @@ mod tests {
             unsupported: Vec::new(),
             catalog_digest: catalog_digest.into(),
             target_choices: BTreeMap::new(),
+            custom_modes: BTreeMap::new(),
+            has_shell_icons: false,
         }
     }
 
@@ -748,10 +792,13 @@ mod tests {
             description: String::new(),
             source_lvl: "m1.lvl".into(),
             variant_title: None,
+            stock_row: None,
             modes_cw: vec!["con".into()],
             modes_gcw: Vec::new(),
+            modes_custom_eras: BTreeMap::new(),
             missions: Vec::new(),
             sound_planets: Vec::new(),
+            era_overrides: BTreeMap::new(),
         };
         let meta = empty_meta(vec![map], "");
         let choices = BTreeMap::new();

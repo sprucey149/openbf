@@ -529,3 +529,109 @@ fn a_seat_keeps_the_soldier_bar_hidden_until_the_rider_leaves() {
         assert_eq!(hud.last("player1.vehicle.healthFraction"), None);
     }
 }
+
+/// A mod's side-LVL records: its table answers after the stock one, and its
+/// slot icon moves with the slot this layout places elsewhere than the PC.
+#[test]
+fn a_side_hud_answers_last_and_follows_the_weapon_slot() {
+    let s = |v: &str| HudArg::Str(v.into());
+    let n = HudArg::Num;
+    let at = |x: f32, y: f32| node("position", &[n(x), n(y), n(0.0), s("Viewport")], vec![]);
+    let table = |pairs: &[(&str, &str)]| {
+        let mut rows: Vec<HudNode> = pairs
+            .iter()
+            .map(|(k, m)| node("namemesh", &[s(k), s(m)], vec![]))
+            .collect();
+        rows.push(node("eventinput", &[s("player1.weapon1.change")], vec![]));
+        rows.push(node("eventoutput", &[s("player1.weapon1.mesh")], vec![]));
+        node("viewport", &[s("Transforms")], vec![node("transformnamemesh", &[], rows)])
+    };
+    let layout = HudLayout {
+        name: "1playerhud".into(),
+        nodes: vec![node(
+            "group",
+            &[s("player1weapon1group")],
+            vec![at(0.4, 0.5)],
+        )],
+    };
+    let stock = HudLayout {
+        name: "hudtransforms".into(),
+        nodes: vec![table(&[("rifle", "stock_rifle")])],
+    };
+    let icon = node(
+        "model3d",
+        &[s("extra")],
+        vec![
+            node("eventmesh", &[s("player1.weapon1.change")], vec![]),
+            node("meshinfo", &[s("rifle")], vec![at(-0.25, 0.36)]),
+        ],
+    );
+    // A table outside any `Viewport` counts as well.
+    let loose = table(&[("rifle", "nothing"), ("pistol", "nothing")])
+        .children
+        .remove(0);
+    let addon = HudLayout {
+        name: "addon".into(),
+        nodes: vec![table(&[("rifle", "nothing")]), icon, loose],
+    };
+    let mut hud = Hud::new(&layout, &stock);
+    let has = |_: &str| true;
+    let event = "player1.weapon1.change";
+    assert_eq!(hud.name_mesh(event, "rifle", &has).as_deref(), Some("stock_rifle"));
+    hud.append_addon(&addon);
+    assert_eq!(hud.name_mesh(event, "rifle", &has).as_deref(), Some("nothing"));
+    assert_eq!(hud.name_mesh(event, "pistol", &has).as_deref(), Some("nothing"));
+
+    let extra = hud.find("extra").unwrap();
+    let [x, y] = PC_WEAPON_SLOTS[0];
+    let want = Vec3::new(
+        (0.4 - x - 0.25) * FRAME_W,
+        (0.5 - y + 0.36) * FRAME_H,
+        0.0,
+    );
+    assert!((hud.elems[extra].mesh_info[0].pos - want).length() < 1e-3);
+}
+
+/// A mod's INGAME.LVL places a model the loaded layout does not; its record
+/// for a model the layout already places changes nothing.
+#[test]
+fn a_mods_mesh_places_fill_only_the_models_the_layout_lacks() {
+    let s = |v: &str| HudArg::Str(v.into());
+    let n = HudArg::Num;
+    let info = |mesh: &str, x: f32| {
+        node(
+            "meshinfo",
+            &[s(mesh)],
+            vec![node("position", &[n(x), n(0.0), n(0.0), s("Viewport")], vec![])],
+        )
+    };
+    let row = |name: &str, infos: Vec<HudNode>| node("model3d", &[s(name)], infos);
+    let layout = HudLayout {
+        name: "1playerhud".into(),
+        nodes: vec![row("player1weapon1mesh", vec![info("rifle", -0.25)])],
+    };
+    let none = HudLayout {
+        name: "hudtransforms".into(),
+        nodes: vec![],
+    };
+    let mut hud = Hud::new(&layout, &none);
+    hud.add_mesh_places(&HudLayout {
+        name: "1playerhud".into(),
+        nodes: vec![
+            row(
+                "player1weapon1mesh",
+                vec![info("Rifle", 0.5), info("flechette", -0.5)],
+            ),
+            row("no_such_element", vec![info("pistol", 0.1)]),
+        ],
+    });
+    let placed: Vec<(&str, f32)> = hud.elems[hud.find("player1weapon1mesh").unwrap()]
+        .mesh_info
+        .iter()
+        .map(|m| (m.mesh.as_str(), m.pos.x))
+        .collect();
+    assert_eq!(
+        placed,
+        [("rifle", -0.25 * FRAME_W), ("flechette", -0.5 * FRAME_W)]
+    );
+}

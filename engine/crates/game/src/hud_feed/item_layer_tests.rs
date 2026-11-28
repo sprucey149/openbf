@@ -35,11 +35,15 @@ fn fixture(flat: bool, bitmap: bool) -> (HudView, Hud) {
             vec![node(
                 "Model3D",
                 &format!("player1weapon{row}mesh"),
-                vec![node(
-                    "Mesh",
-                    &format!("{}item{row}", if bitmap { "bitmap:" } else { "" }),
-                    vec![],
-                )],
+                vec![
+                    node(
+                        "Mesh",
+                        &format!("{}item{row}", if bitmap { "bitmap:" } else { "" }),
+                        vec![],
+                    ),
+                    // As 1playerhud has it: in front of the pill.
+                    number("ZOrder", 5.0),
+                ],
             )],
         ));
     }
@@ -117,7 +121,6 @@ fn weapon_pills_precede_both_rows_and_bitmap_fallback_in_nested_and_flat_layouts
         for bitmap in [false, true] {
             let (view, original) = fixture(flat, bitmap);
             let frame = ui::hud_draw::draw(&view.hud, &view.art, [1280.0, 720.0]);
-            let old = ui::hud_draw::draw(&original, &view.art, [1280.0, 720.0]);
             for row in 1..=2 {
                 let at = |frame: &ui::hud_draw::HudFrame, name: &str| {
                     frame
@@ -126,7 +129,6 @@ fn weapon_pills_precede_both_rows_and_bitmap_fallback_in_nested_and_flat_layouts
                         .position(|b| b.texture.starts_with(name))
                         .unwrap()
                 };
-                assert!(at(&old, &format!("pill{row}/")) > at(&old, &format!("item{row}")));
                 let pill = at(&frame, &format!("pill{row}/"));
                 let item = at(&frame, &format!("item{row}"));
                 assert!(pill < item, "flat={flat} bitmap={bitmap} row={row}");
@@ -142,13 +144,6 @@ fn weapon_pills_precede_both_rows_and_bitmap_fallback_in_nested_and_flat_layouts
             }
             // Retain hierarchy, transforms, alpha and all other element state.
             let mut restored = view.hud.elems.clone();
-            for row in 1..=2 {
-                let i = view
-                    .hud
-                    .find(&format!("player1weapon{row}backdrop"))
-                    .unwrap();
-                restored[i].z_order = 8;
-            }
             // The view also appends the spectate text rows; every element
             // the layout had stays as it was.
             let extra: Vec<&str> = restored[original.elems.len()..]
@@ -294,7 +289,7 @@ fn weapon_pills_real_content_overlap() {
                 for (arm, show_pill, show_item, order) in [
                     ("item", false, true, 255),
                     ("pill", true, false, 255),
-                    ("before", true, true, 8),
+                    ("before", true, true, 0),
                     ("after", true, true, candidate_order),
                 ] {
                     view.hud.elems[pill].fader.state = if show_pill { 2 } else { 0 };

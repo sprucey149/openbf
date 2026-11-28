@@ -52,7 +52,7 @@ openbf_data/mod_cache/<namespace>/  (versioned native assets + cache_meta.ron)
 2. **Automatic discovery:** `openbf-launcher` scans `openbf_data/mods/` on startup, on window focus regain, and on **Refresh**. Small uncached mods (up to 8 MiB of candidate replacement LVLs) are deep-inspected inline; larger uncached mods appear immediately via metadata-only discovery and deep-inspect on demand when enabled or expanded.
 3. **Stable identity:** Each folder receives a deterministic ID (`content.<slug>`) and isolated asset/mission namespace (`mod_<slug>`) derived from the folder name (or optional `openbf_mod.ron` `id`), with a short SHA-256 suffix on slug collisions. Two folders shipping the same legacy 3-character addon tag remain distinct everywhere.
 4. **Enable & order:** Players toggle mods on/off and set override priority (`#1` = highest priority) with **Up** / **Down**. Enabled state and order persist atomically in `openbf_data/extensions.ron` (schema v2) across restarts, temporary disables, and folder removal/re-insertion.
-5. **Ambiguous replacement targets:** If a replacement LVL matches more than one stock file (for example, a filename shared across faction directories), the launcher surfaces a target selector (`ComboBox` + **Ignore**) and saves the player's choice in `openbf_data/mod_targets.ron` outside the mod folder.
+5. **Ambiguous replacement targets:** Targets come only from the Battlefront II stock catalog. A replacement LVL that fits no single stock file clearly (for example, a filename shared across faction directories with equal content) is listed as an unclear target and stays stock. A target can be named in `openbf_data/mod_targets.ron` or the mod's `openbf_mod.ron`.
 6. **Direct launches & suppression:** Launching `openbf` directly without opening the launcher first still reads `openbf_data/extensions.ron` and prepares missing/stale caches via `bake mod-convert` (if `bake` is reachable). Passing `--no-mods` suppresses all content mods for that run.
 
 ---
@@ -85,7 +85,8 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
    - **Class patches:** Side replacement class edits are emitted as `<classes>.patch.ron` sidecars (`manifest::class_patch`) containing only properties whose digest differs from the stock PC catalog. `game::classdb` reads the in-scope override stack (`pak::read_override_stack`) and applies `manifest::class_patch::apply_stack` over the stock PS2-canonical `classes/<g>_<side>.ron`: a `Full` replacement forms a coherent base that shadows lower-priority patches to the same side, while partial `Patch` layers above it compose from lowest to highest priority so `#1` wins on conflicts and independent class changes compose cleanly.
 3. **Stock fallback:**
    - Any path not claimed by an overlay falls through transparently to the immutable stock mount (`assets_baked/` and `missions/` on disk in a checkout, or `openbf.pak` / appended executable in a packed build).
-4. **Localization (`locl`):**
+4. **Level layers (`level:<map_key>`):** An addon map's own units (see §5) are converted into `levels/<map_key>/assets/` in the mod's cache, under the same relative names as stock assets (`side_bf2/soldiers`, `side_bf2/weapons`, `side_bf2/textures`, `classes/<file>.patch.ron`), with `levels/<map_key>/removed.ron` listing stock companions the addon model has none of. `game::mods_runtime` mounts it as an `Overrides` layer scoped to that map, above the mods' replacements, and `game::assets::scope_overlays_to_map` activates it with `pak::set_level_scope` only while that map is loaded.
+5. **Localization (`locl`):**
    - Addon `core.lvl` string tables are converted to `locl/english.ron` and stacked in load-order priority via `game::event_feed::set_mod_locls`.
 
 ---
@@ -96,13 +97,23 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 
 1. **Static Lua 5.0 translation (`mungefs::lua50`, `mungefs::addon`, `bake::mods::mission`):**
    - `mungefs::lua50` parses compiled Lua 5.0 chunks and runs a bounded static opcode evaluator (`evaluate_standalone_registration`, `analyze_standalone_variants`) in a standalone environment (external mod checks evaluate false so cross-mod registrations stay out of standalone Instant Action).
-   - `mungefs::addon::mission_fold` folds team rosters, eras, modes (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`), heroes, spawns, audio planet references, and multi-variant world selections (retaining single-player weights and the fixed multiplayer branch).
+   - `mungefs::addon::mission_fold` folds team rosters, stock and custom v1.3 eras (`era_<code>` + `change.era_<code>` metadata + `SupportsCustomEraTeams` / `CustomEraTeam1` / `CustomEraTeam2`), stock and custom modes (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`, plus translated custom mode scripts), heroes, spawns, audio planet references, and variant selections (retaining single-player weights and the multiplayer branch). Variants are distinct when their world loads, class load order, teams, third teams or heroes differ. The mission file records the value `math.random` took (`script_setup`), and the game runs the script's setup with the same value, so the running script agrees with the converted roster.
    - `mungefs::addon::world_events::compile` extracts a closed set of deterministic world actions (named station destruction, one-shot timers, world animation triggers, route/barrier toggles, object kills, named effects) from reachable callbacks.
-   - `bake::mods::mission` emits native `missions/mod_<slug>__*.ron` files.
+   - `bake::mods::mission` emits native `missions/mod_<slug>__*.ron` files (using `_cw` for Clone Wars when paired with another era and `_era_<code>` for custom eras so eras sharing stock team names never collide).
 2. **Addon world & audio baking (`bake::mods::convert`, `bake::mods::world`):**
    - Primary and companion world LVLs are assembled per variant and baked through `bake::map` into GLB meshes/terrain/water/lowres, KTX2 textures (including signed D3D9 `V8U8` normal maps for PC water), `manifest.ron`, `classes.ron`, `effects.ron`, `foliage.bin`, and `world_anims.ron`. Byte-identical files across variants share storage via hard links where supported.
    - Optional addon load screens (`bake::loadscreen`), `core.lvl` localization (`bake::hud::bake_locl`), and one addon sound archive per map group (`bake::sounds::bake_addon_sounds`, inheriting stock CORE templates for spatial/bus defaults) are baked into the same cache.
-3. **Stock LVL replacement baking (`bake::mods::replace`, `bake::stock`):**
+   - A mission that reads one of the game's own worlds records it as a `stock:<planet>/<map>.lvl` world load (`mungefs::addon::stock_world_rel`). That world is the map's base and every LVL of the mod's own is a layer on it, in the script's order. The converter reads the world from the player's PC copy of Battlefront II, which it only reads, and bakes it like an addon world into the mod's namespace.
+   - A mod adds modes to a stock map by merging flags into that map's menu entry. The menu script is evaluated against the stock entries (`mungefs::lua50` seeds one per `mapluafile`), so such a mission carries `stock_row` (the map code, `cor1`) and joins that map's Instant Action row; picking a mode and era the mod added loads the mod's world. Only scripts a menu list names are offered: one the mod only registers with `AddDownloadableContent` is skipped.
+   - For the mod's own maps, worlds that share a source LVL and a map name share one menu row, which picks the world by the chosen mode and era. Two scripts offering the same mode and era keep their own rows `[ours]`.
+   - A mission with a translated mode script sets `Battle::script_rules`: the engine pays no reinforcements, applies no bleed and calls no winner on its own, since the script does (`OnCharacterDeathTeam`, `AddReinforcements`, `MissionDefeat`). Death and spawn events carry the unit's team and class, which the filtered registrations match.
+3. **Addon units (`bake::mods::addon_sides`):**
+   - The side LVLs a mission loads from the addon's own folder (`ReadDataFile("dc:SIDE\...")`) supply the soldiers and weapons that mission asks for: each unit's body and every weapon along its class parents are baked with their textures, and their classes become class patches. A name two side files define takes the first in script load order.
+   - Vehicles the missions ask for are baked once per side LVL into `side_bf2/vehicles/0addonNN_<side>/`; the names sort before the stock sides, in the order the scripts read them. A pad's `ClassNeutral` is its class while no team owns it. Vehicle sounds are not converted.
+   - The sides' particle effects and the bolt textures their ordnance names go to `side_bf2/effects/addon/`, which the game reads before the stock effect layers.
+   - A script may choose a unit while it runs and load it through a variable, so every soldier of the map's side files that a script of the mod names is baked too.
+   - A third team whose classes are only known when its script runs joins the battle after the script's setup (`CampaignRuntime::take_native_requests`), and `SpawnCharacter` fields the class the script selected for that member.
+4. **Stock LVL replacement baking (`bake::mods::replace`, `bake::stock`):**
    - During stock asset preparation (`scripts/rebake.sh catalog` or `launcher::pipeline::rebake::bake_stock_catalog`), `bake stock-catalog` writes metadata-only catalogs (`assets_baked/catalog/<game>_<platform>.ron` and `stock_bake.ron`) containing chunk/property digests and output mappings (no copyrighted assets).
    - `bake::mods::replace` diffs each active replacement LVL against its stock catalog entry and re-bakes only what changed:
      - **SIDE (`side/*.lvl`):** Class patch sidecar, changed soldiers/weapons/vehicles (borrowing stock animation banks verified by SHA-256), side effects, and changed textures at both texture tiers.
@@ -125,6 +136,14 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
   - `replacement_key` (derived from active `ResourceOp`s; validated via `catalog_digest` and `target_choices` when replacements are present)
   - Presence and path-safety checks on every expected `manifest.ron`, mission RON, `locl/english.ron`, and non-removed `replacement_outputs` file on disk.
 - Safe to delete `openbf_data/mod_cache/` at any time; enabled mods regenerate automatically.
+
+### Reusing a stale cache's assets (`bake::mods::assets`)
+
+- A conversion has three kinds of **asset step**: one per map (`assets/<map_key>/`: world, load screen, sounds), one for all the maps' own units (`levels/`: side units, vehicles, effects) and one for the stock replacements (`overrides/`). `asset_steps.ron`, at the cache root, records each step's key, folder, file count and byte total, and what the step reported.
+- A step's key hashes `MOD_ASSET_ID`, the mod's id and source fingerprint, the stock archive's path, length and write time, the catalog digest, the stock game copies, the player's target choices, and what the step is asked to make. A reconversion keeps a step whose key matches and whose folder still holds the recorded files and bytes. Everything else (missions, localization, shell icons, `cache_meta.ron`) is made anew each time, in seconds.
+- `MOD_ASSET_ID` is `MOD_CONVERTER_ID` without the mission and menu logic (`LOGIC` in `engine/crates/extensions/build.rs`). So an update to that logic keeps every asset, while an update to any other converter source rebuilds all of them: the asset modules call one another too freely to be told apart safely.
+- Kept folders move from the old cache into the staging directory just before the swap, and move back if the swap fails.
+- No reuse when the stock assets are a loose directory, whose files may change at any time. OURS: a stock game copy is taken to stay as it is while its path does.
 
 ### Launcher & Scanner Acceleration Caches (`openbf_data/cache/`)
 
@@ -150,7 +169,8 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 ## 8. Extending the System (Developers & Coding Agents)
 
 - **Preserve crate boundaries:** Never add `mungefs` as a normal dependency of `game` or `extensions`. Keep runtime loading strictly over `extensions` + `manifest` + `pak`.
-- **No converter version to bump:** `MOD_CONVERTER_ID` is a hash of every non-test source file in the crates `bake` links (`bake`, `audio`, `extensions`, `mungefs`, `manifest` with its `data/`, `pak`), computed at build time by `engine/crates/extensions/build.rs`. Any change to the converter makes existing caches read as stale and rebuild; the launcher and game pick the `bake` binary whose `bake mod-converter-id` matches their own.
+- **No converter version to bump:** `MOD_CONVERTER_ID` is a hash of every non-test source file in the crates `bake` links (`bake`, `audio`, `extensions`, `mungefs`, `manifest` with its `data/`, `pak`), computed at build time by `engine/crates/extensions/build.rs`. Any change to the converter makes existing caches read as stale and rebuild (keeping their assets when only the mission and menu logic changed, §6); the launcher and game pick the `bake` binary whose `bake mod-converter-id` matches their own.
+- **Asset code stays out of the mission logic:** a file in `LOGIC` is left out of `MOD_ASSET_ID`, so it must write nothing below a step's folder, and code outside the list must not call into it (`engine/crates/bake/tests/asset_code.rs` checks the calls). An asset step's input that the logic chooses belongs in the step's settings, which are part of its key.
 - **Adding a new stock replacement target kind:**
   1. Ensure stock catalog generation (`bake::stock`, `scripts/rebake.sh catalog`, `launcher::pipeline::rebake::bake_stock_catalog`) indexes the target LVL and its outputs.
   2. Add classification and conversion in `bake/src/mods/replace.rs`, emitting `ReplacementOutput` entries (including `removed: true` for removed companions in `Full` mode) and honest `unsupported` diagnostics for unhandled chunks.
@@ -165,7 +185,8 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 - **Unsupported legacy mod features (reported honestly in diagnostics):**
   - Arbitrary runtime Lua mission logic outside supported declarative tables and closed world-event actions (e.g., ambient fish/bird flocks, custom Lua timers/triggers, movie previews).
   - Third-party native DLL plugins.
-  - Full custom non-stock side LVL model/texture/animation authoring inside addon maps (only custom side `classes.ron` is currently baked for addon-private sides).
+  - Vehicle sounds, unit sounds and voice lines, some first-person arms and custom animation banks from an addon map's own side LVLs (its soldiers, weapons, vehicles, particle effects and textures are converted).
+  - On a script's third team, `SetClassProperty` applies `MaxHealth` only.
   - Dynamic BF2 `CLTH` cloth simulation (deferred engine-wide under `CLOTH2`; rigid flagpoles/worn cloth render without physics).
   - Menu shell side LVLs (`side/*shell.lvl`), PC 1.1 `GeometryAddon` attachments, 3D starfighter cockpit FPM models, normal/bump maps on non-water surfaces, custom `zaf_`/`zaa_` animation banks, and unsupported skinned MTRL blend modes.
 - **Multiple full side replacements targeting the same stock side:** Two `Full` side LVL replacements targeting the same stock side are treated as coherent replacement sets where `#1` shadows `#2` rather than mixing incompatible models/skeletons/classes; partial `Patch` layers above a full replacement or each other compose per-class with `#1` winning on conflicts.

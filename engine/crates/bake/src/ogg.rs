@@ -87,10 +87,45 @@ pub fn pin_ogg_serial(buf: &mut [u8], serial: u32) -> Result<usize> {
     Ok(pages)
 }
 
+/// Resolve the `ffmpeg` executable to invoke: `OPENBF_FFMPEG` when set,
+/// else a bundled copy beside this binary (`<exe_dir>/ffmpeg(.exe)`,
+/// `<exe_dir>/tools/ffmpeg(.exe)`, `<exe_dir>/openbf_data/tools/ffmpeg(.exe)`),
+/// else `"ffmpeg"` on `PATH`.
+pub fn ffmpeg_bin() -> std::path::PathBuf {
+    let env = std::env::var_os("OPENBF_FFMPEG");
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+    resolve_ffmpeg_bin(env.as_deref(), exe_dir.as_deref())
+}
+
+fn resolve_ffmpeg_bin(
+    env_override: Option<&std::ffi::OsStr>,
+    exe_dir: Option<&std::path::Path>,
+) -> std::path::PathBuf {
+    if let Some(ov) = env_override.filter(|s| !s.is_empty()) {
+        return std::path::PathBuf::from(ov);
+    }
+    let name = format!("ffmpeg{}", std::env::consts::EXE_SUFFIX);
+    if let Some(dir) = exe_dir {
+        for cand in [
+            dir.join(&name),
+            dir.join("tools").join(&name),
+            dir.join("openbf_data").join("tools").join(&name),
+        ] {
+            if cand.is_file() {
+                return cand;
+            }
+        }
+    }
+    std::path::PathBuf::from("ffmpeg")
+}
+
 /// Encode mono s16 PCM to an OGG/Vorbis stream with the given serial.
 /// `quality` is ffmpeg's `-qscale:a` (0..10).
 pub fn encode_mono(pcm: &[i16], rate: u32, quality: u32, serial: u32) -> Result<Vec<u8>> {
-    let mut child = Command::new("ffmpeg")
+    let ffmpeg = ffmpeg_bin();
+    let mut child = Command::new(&ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-f", "s16le", "-ar"])
         .arg(rate.to_string())
         .args(["-ac", "1", "-i", "-", "-c:a", "libvorbis", "-qscale:a"])
@@ -100,7 +135,7 @@ pub fn encode_mono(pcm: &[i16], rate: u32, quality: u32, serial: u32) -> Result<
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("spawn ffmpeg (is it installed?)")?;
+        .with_context(|| format!("spawn {} (is ffmpeg installed or bundled?)", ffmpeg.display()))?;
     let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
     // s16 LE is the sample's own layout on every target this builds for, but
     // spell it out rather than transmute: the encode must not depend on it.
@@ -128,11 +163,12 @@ pub fn encode_mono(pcm: &[i16], rate: u32, quality: u32, serial: u32) -> Result<
     Ok(out)
 }
 
-/// True when ffmpeg is on PATH — the bake says so rather than writing half a
-/// tree (`bake::beep` silently skips its OGGs instead, which is why the beep
-/// group's output depends on the machine).
+/// True when a usable `ffmpeg` is available via [`ffmpeg_bin`] (`OPENBF_FFMPEG`,
+/// bundled beside `bake`, or on `PATH`) — the bake says so rather than writing
+/// half a tree (`bake::beep` silently skips its OGGs instead, which is why the
+/// beep group's output depends on the machine).
 pub fn have_ffmpeg() -> bool {
-    Command::new("ffmpeg")
+    Command::new(ffmpeg_bin())
         .arg("-version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -277,5 +313,38 @@ mod tests {
         let mut short = synthetic();
         short.truncate(30);
         assert!(pin_ogg_serial(&mut short, 1).is_err());
+    }
+
+    #[test]
+    fn resolve_ffmpeg_prefers_env_then_bundled_then_path() {
+        let dir = std::env::temp_dir().join(format!("openbf_ffmpeg_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        let name = format!("ffmpeg{}", std::env::consts::EXE_SUFFIX);
+
+        // Fallback to PATH when nothing is bundled and no env override is set.
+        assert_eq!(
+            resolve_ffmpeg_bin(None, Some(&dir)),
+            std::path::PathBuf::from("ffmpeg")
+        );
+
+        // Bundled in tools/ is found.
+        let in_tools = dir.join("tools").join(&name);
+        std::fs::write(&in_tools, b"stub").unwrap();
+        assert_eq!(resolve_ffmpeg_bin(None, Some(&dir)), in_tools);
+
+        // Sibling next to the binary takes precedence over tools/.
+        let sibling = dir.join(&name);
+        std::fs::write(&sibling, b"stub").unwrap();
+        assert_eq!(resolve_ffmpeg_bin(None, Some(&dir)), sibling);
+
+        // Explicit OPENBF_FFMPEG override wins over everything.
+        let explicit = std::ffi::OsStr::new("/custom/ffmpeg");
+        assert_eq!(
+            resolve_ffmpeg_bin(Some(explicit), Some(&dir)),
+            std::path::PathBuf::from("/custom/ffmpeg")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

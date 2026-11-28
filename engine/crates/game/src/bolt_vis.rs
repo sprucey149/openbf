@@ -407,9 +407,10 @@ impl BoltVis {
         };
         Self {
             lights: source_game.eq_ignore_ascii_case("bf2"),
-            dirs: first
-                .iter()
-                .map(|c| assets_dir.join(c).join("textures"))
+            // A mod map's own bolt sheets first (its layer alone has them).
+            dirs: std::iter::once(assets_dir.join("side_bf2/effects/addon/textures"))
+                .filter(|_| source_game.eq_ignore_ascii_case("bf2"))
+                .chain(first.iter().map(|c| assets_dir.join(c).join("textures")))
                 .collect(),
             ..Self::default()
         }

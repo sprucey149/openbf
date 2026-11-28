@@ -235,6 +235,7 @@ impl DroidekaVisuals {
                 extra_mips: Vec::new(),
                 detail: None,
                 bump: None,
+                env: None,
             },
             "droideka_shield",
         )

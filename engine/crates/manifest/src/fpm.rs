@@ -145,6 +145,26 @@ pub fn clip_names(bank: &str) -> Vec<&'static str> {
     names
 }
 
+/// Where the arms of `key` (a model, or `<path>;<model>`) may be: first the
+/// copy a mod keeps below the LVL's own path, then the side's by model name.
+pub fn arms_path(
+    side_dir: &std::path::Path,
+    key: &str,
+) -> (Option<std::path::PathBuf>, std::path::PathBuf) {
+    let (path, model) = key.rsplit_once(';').unwrap_or(("", key));
+    let own = (!path.is_empty()
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(':')))
+    .then(|| {
+        side_dir
+            .join("fpm")
+            .join(path)
+            .join(format!("{}.glb", model.to_ascii_lowercase()))
+    });
+    (own, glb_path(side_dir, model))
+}
+
 pub fn glb_path(side_dir: &std::path::Path, model: &str) -> std::path::PathBuf {
     side_dir
         .join("fpm")

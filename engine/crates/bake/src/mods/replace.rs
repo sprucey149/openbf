@@ -40,7 +40,7 @@ use super::ModEnv;
 use crate::stock::StockAssets;
 
 /// What the replacements wrote.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Replaced {
     pub outputs: Vec<ReplacementOutput>,
     pub unsupported: Vec<String>,
@@ -271,6 +271,114 @@ fn files_below(root: &Path) -> Vec<String> {
     }
     out.sort();
     out
+}
+
+/// A directory holding the four sides as the stock soldier bake loads them
+/// side by side (`ALL`, `IMP`, `REP`, `CIS`) and `own`: the mod's own where
+/// `mod_sides` has one, else the stock PC copy. Also the animation LVL, with
+/// the borrowed-clip lender set ([`crate::soldier::set_lender`]).
+pub(super) fn sibling_sides(
+    env: &ModEnv,
+    scratch: &Path,
+    game: SourceGame,
+    own: &str,
+    mod_sides: &BTreeMap<(SourceGame, String), PathBuf>,
+    label: &str,
+    warnings: &mut Vec<String>,
+) -> Result<(PathBuf, PathBuf)> {
+    let dir = scratch.join("sides").join(game.key());
+    std::fs::create_dir_all(&dir)?;
+    let mut names: Vec<String> = SIDES.iter().map(|s| s.to_string()).collect();
+    if !names.iter().any(|n| n == own) {
+        names.push(own.to_owned());
+    }
+    for s in &names {
+        let dst = dir.join(format!("{}.LVL", s.to_ascii_uppercase()));
+        if dst.is_file() {
+            continue;
+        }
+        let src = match mod_sides.get(&(game, s.clone())) {
+            Some(p) => p.clone(),
+            None => match env.sources.file(
+                game,
+                SourcePlatform::Pc,
+                &format!("side/{s}.lvl"),
+                scratch,
+            ) {
+                Ok(p) => p,
+                Err(e) => {
+                    warnings.push(format!(
+                        "{label}: soldiers load without the stock {s}.lvl beside them ({e:#}); configure the PC copy in the launcher"
+                    ));
+                    continue;
+                }
+            },
+        };
+        std::fs::copy(&src, &dst)
+            .with_context(|| format!("copying {} -> {}", src.display(), dst.display()))?;
+        if mod_sides.contains_key(&(game, s.clone())) {
+            crate::gameplay::exempt_addon(&dst);
+        }
+    }
+    let (own_anims, lender_game) = match game {
+        SourceGame::Bf2 => ("bf2_anims", SourceGame::Bf1),
+        SourceGame::Bf1 => ("bf1_anims", SourceGame::Bf2),
+    };
+    let anims = anim_lvl(env, scratch, game, own_anims, label, warnings)?
+        .ok_or_else(|| anyhow!("no {} animation LVL is configured", game.key()))?;
+    let stock_has_lender = env.stock.as_ref().is_some_and(|stock| {
+        stock.exists(&format!("common_{}/common.ron", lender_game.key()))
+    });
+    let lender = if stock_has_lender {
+        let role = match lender_game {
+            SourceGame::Bf1 => "bf1_anims",
+            SourceGame::Bf2 => "bf2_anims",
+        };
+        anim_lvl(env, scratch, lender_game, role, label, warnings)?
+    } else {
+        None
+    };
+    let lender_var = match game {
+        SourceGame::Bf2 => "BF1_ANIMS",
+        SourceGame::Bf1 => "BF2_ANIMS",
+    };
+    crate::soldier::set_lender(lender_var, lender.as_deref());
+    Ok((dir, anims))
+}
+
+/// The animation LVL of `game` the stock bake used (`role` in
+/// `catalog/stock_bake.ron`, checked byte for byte), else the configured
+/// PS2 copy's, else the PC copy's.
+pub(super) fn anim_lvl(
+    env: &ModEnv,
+    scratch: &Path,
+    game: SourceGame,
+    role: &str,
+    label: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Option<PathBuf>> {
+    if let Some(dep) = env.catalogs.bake.dependency(role) {
+        return env
+            .sources
+            .verified_file(dep, scratch)
+            .map(Some)
+            .with_context(|| describe(dep));
+    }
+    let rel = match game {
+        SourceGame::Bf2 => "ingame.lvl",
+        SourceGame::Bf1 => "common.lvl",
+    };
+    for platform in [SourcePlatform::Ps2, SourcePlatform::Pc] {
+        if let Ok(p) = env.sources.file(game, platform, rel, scratch) {
+            warnings.push(format!(
+                "{label}: animations from {} {} {rel}, not checked against the stock bake (it recorded none)",
+                game.key(),
+                platform.key()
+            ));
+            return Ok(Some(p));
+        }
+    }
+    Ok(None)
 }
 
 struct Job<'a> {
@@ -800,99 +908,29 @@ impl Job<'_> {
             .to_ascii_uppercase()
     }
 
-    /// A directory holding the four sides as the stock soldier bake loads
-    /// them side by side (`ALL`, `IMP`, `REP`, `CIS`): the mod's own where
-    /// it replaces one, else the stock PC copy. Also the animation LVL, with
-    /// the borrowed-clip lender set ([`crate::soldier::set_lender`]).
+    /// [`sibling_sides`] for this replacement.
     fn sibling_dir(&mut self) -> Result<(PathBuf, PathBuf)> {
-        let game = self.target.game;
-        let dir = self.scratch.join("sides").join(game.key());
-        std::fs::create_dir_all(&dir)?;
         let own = self.target_stem_upper().to_ascii_lowercase();
-        let mut names: Vec<String> = SIDES.iter().map(|s| s.to_string()).collect();
-        if !names.contains(&own) {
-            names.push(own.clone());
-        }
-        for s in &names {
-            let dst = dir.join(format!("{}.LVL", s.to_ascii_uppercase()));
-            if dst.is_file() {
-                continue;
-            }
-            let src = match self.mod_sides.get(&(game, s.clone())) {
-                Some(p) => p.clone(),
-                None => match self.env.sources.file(
-                    game,
-                    SourcePlatform::Pc,
-                    &format!("side/{s}.lvl"),
-                    self.scratch,
-                ) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        self.r.warnings.push(format!(
-                            "{}: soldiers load without the stock {s}.lvl beside them ({e:#}); configure the PC copy in the launcher",
-                            self.op.source
-                        ));
-                        continue;
-                    }
-                },
-            };
-            std::fs::copy(&src, &dst)
-                .with_context(|| format!("copying {} -> {}", src.display(), dst.display()))?;
-            if self.mod_sides.contains_key(&(game, s.clone())) {
-                crate::gameplay::exempt_addon(&dst);
-            }
-        }
-        let (own_anims, lender_game) = match game {
-            SourceGame::Bf2 => ("bf2_anims", SourceGame::Bf1),
-            SourceGame::Bf1 => ("bf1_anims", SourceGame::Bf2),
-        };
-        let anims = self
-            .anim_lvl(game, own_anims)?
-            .ok_or_else(|| anyhow!("no {} animation LVL is configured", game.key()))?;
-        let lender = if self.stock.exists(&format!("common_{}/common.ron", lender_game.key())) {
-            self.anim_lvl(lender_game, match lender_game {
-                SourceGame::Bf1 => "bf1_anims",
-                SourceGame::Bf2 => "bf2_anims",
-            })?
-        } else {
-            None
-        };
-        let lender_var = match game {
-            SourceGame::Bf2 => "BF1_ANIMS",
-            SourceGame::Bf1 => "BF2_ANIMS",
-        };
-        crate::soldier::set_lender(lender_var, lender.as_deref());
-        Ok((dir, anims))
+        sibling_sides(
+            self.env,
+            self.scratch,
+            self.target.game,
+            &own,
+            self.mod_sides,
+            &self.op.source,
+            &mut self.r.warnings,
+        )
     }
 
-    /// The animation LVL of `game` the stock bake used (`role` in
-    /// `catalog/stock_bake.ron`, checked byte for byte), else the configured
-    /// PS2 copy's, else the PC copy's.
     fn anim_lvl(&mut self, game: SourceGame, role: &str) -> Result<Option<PathBuf>> {
-        if let Some(dep) = self.env.catalogs.bake.dependency(role) {
-            return self
-                .env
-                .sources
-                .verified_file(dep, self.scratch)
-                .map(Some)
-                .with_context(|| describe(dep));
-        }
-        let rel = match game {
-            SourceGame::Bf2 => "ingame.lvl",
-            SourceGame::Bf1 => "common.lvl",
-        };
-        for platform in [SourcePlatform::Ps2, SourcePlatform::Pc] {
-            if let Ok(p) = self.env.sources.file(game, platform, rel, self.scratch) {
-                self.r.warnings.push(format!(
-                    "{}: animations from {} {} {rel}, not checked against the stock bake (it recorded none)",
-                    self.op.source,
-                    game.key(),
-                    platform.key()
-                ));
-                return Ok(Some(p));
-            }
-        }
-        Ok(None)
+        anim_lvl(
+            self.env,
+            self.scratch,
+            game,
+            role,
+            &self.op.source,
+            &mut self.r.warnings,
+        )
     }
 
     fn effects(&mut self, stem: &str) -> Result<()> {

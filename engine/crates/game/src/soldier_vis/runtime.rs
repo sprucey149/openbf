@@ -506,10 +506,21 @@ impl SoldierVisuals {
     /// One skinned soldier model, or `None` if it is not baked. Without a
     /// renderer it has no meshes.
     pub(super) fn load_body(
+        r: Option<&mut Renderer>,
+        assets_dir: &Path,
+        game: &str,
+        geometry: &str,
+        cache: &mut HashMap<String, Option<TextureHandle>>,
+    ) -> Option<SoldierAsset> {
+        Self::load_body_with_fallback_groups(r, assets_dir, game, geometry, None, cache)
+    }
+
+    pub(super) fn load_body_with_fallback_groups(
         mut r: Option<&mut Renderer>,
         assets_dir: &Path,
         game: &str,
         geometry: &str,
+        fallback_groups: Option<&std::collections::BTreeMap<String, Vec<String>>>,
         cache: &mut HashMap<String, Option<TextureHandle>>,
     ) -> Option<SoldierAsset> {
         // The side bake knows no map, so a BF1 part's sun-coloured
@@ -528,6 +539,7 @@ impl SoldierVisuals {
         };
         let mut meshes = Vec::new();
         let mut groups = Vec::new();
+        let mut skin_groups = std::collections::BTreeMap::new();
         if let Some(r) = r.as_deref_mut() {
             match crate::viewer::upload_skinned(r, &asset.mesh) {
                 Ok(parts) => {
@@ -540,6 +552,15 @@ impl SoldierVisuals {
                         .unwrap_or_default();
                     let mats: Vec<Option<&str>> = parts.iter().map(|p| p.1).collect();
                     groups = part_groups(&mats, &skins.groups);
+                    if let Some(fb) = fallback_groups {
+                        let fallback = part_groups(&mats, fb);
+                        for (g, f) in groups.iter_mut().zip(fallback) {
+                            if g.is_none() {
+                                *g = f;
+                            }
+                        }
+                    }
+                    skin_groups = skins.groups;
                     for (k, (mesh, mat, layer)) in parts.into_iter().enumerate() {
                         let tex = Self::texture(r, &side, mat, [0.0; 2], cache);
                         meshes.push((mesh, tex, layer, part_spec(r, asset.mesh.spec_pass(k))));
@@ -567,6 +588,7 @@ impl SoldierVisuals {
             &effective_game,
             geometry,
             &asset,
+            (!skin_groups.is_empty()).then_some(&skin_groups),
             cache,
         );
         if let (Some(r), Some(low_asset)) = (r, low.as_deref()) {

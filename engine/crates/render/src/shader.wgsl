@@ -120,12 +120,17 @@ struct MaterialParams {
     offset: vec4<f32>,
     // x = 1: the texture carries a PC normal map (`render::BumpDesc`,
     // binding 5) and its lit draws take `bump_lit`; 0 everywhere else.
+    // y = 1: it carries a PC environment cube (`render::EnvDesc`, binding
+    // 6) and its specular pass is the PC's environment pass.
     bump: vec4<f32>,
 };
 @group(1) @binding(3) var<uniform> material: MaterialParams;
 // A PC BF2 normal map (`bake::bump`): tangent-space normal in rgb, the
 // specular pass's gloss weight in alpha. Without one the base view, unread.
 @group(1) @binding(5) var t_bump: texture_2d<f32>;
+// A PC BF2 environment cube (`bake::envmap`), gamma bytes. Without one a
+// blank cube, unread.
+@group(1) @binding(6) var t_env: texture_cube<f32>;
 
 // Skinned draws: per-draw joint palette (model-space joint matrices, i.e.
 // joint_global * inverse_bind), bound with a dynamic offset per draw.
@@ -1214,7 +1219,9 @@ struct VsSpecOut {
     @location(3) view_dist: f32,
     @location(4) cull: vec2<f32>,
     @location(5) cull_near: vec2<f32>,
-    @location(6) spec_uv: vec2<f32>,
+    // xy = the table coordinate; for a PC environment draw, xyz = the
+    // world reflection its cube is read along.
+    @location(6) spec_uv: vec3<f32>,
     @location(7) spec_rgb: vec3<f32>,
     // The base draw's `render::LightPath`, so `fs_spec` recomputes the base
     // colour the base draw had.
@@ -1321,7 +1328,11 @@ fn spec_varyings(
     if spec.mirror > 0.5 {
         d = 2.0 * dot(spec.cam_right, l) * dot(spec.cam_right, r) - d;
     }
-    out.spec_uv = vec2<f32>(inst_color.a, 0.5 + 0.5 * d);
+    out.spec_uv = vec3<f32>(inst_color.a, 0.5 + 0.5 * d, 0.0);
+    if material.bump.y > 0.5 {
+        // The PC's vertex R = I - 2 (I.N) N, I = eye -> vertex.
+        out.spec_uv = i - 2.0 * dot(n, i) * n;
+    }
     out.spec_rgb = inst_color.rgb;
     return out;
 }
@@ -1404,6 +1415,26 @@ fn pc_bump_spec(in: VsSpecOut, f: BumpFrame) -> vec3<f32> {
     return add;
 }
 
+// The PC's environment pass (`analysis/re-pc-envmap.md`): `0x702c06` gives
+// the cube one light slot of colour 1, and `specularlighting_shader.xml`
+// ps003 with its vertex shader writes
+//     out = cube(R) * c0, alpha = t0.a
+// c0 the material's specular colour (`in.spec_rgb`), added One/One under the
+// alpha test of `0x7021a0` (reference 0x7f).
+// PROVISIONAL: the test's compare is GREATER, which the pass's own state block
+// leaves as it finds it. trace: the last `D3DRS_ALPHAFUNC` write before it.
+// OURS: the base texture's sampler reads the cube, and the per-instance byte
+// `0x702720` scales c0 by is read as 1.
+fn pc_env_spec(in: VsSpecOut) -> vec3<f32> {
+    let uv = material_uv(in.uv);
+    let alpha = textureSample(t_color, s_color, uv).a;
+    let cube = textureSample(t_env, s_color, in.spec_uv).rgb;
+    if alpha <= 127.0 / 255.0 {
+        return vec3<f32>(0.0);
+    }
+    return cube * min(in.spec_rgb, vec3<f32>(1.0));
+}
+
 @fragment
 fn fs_spec(in: VsSpecOut) -> @location(0) vec4<f32> {
     var b: VsOut;
@@ -1428,8 +1459,10 @@ fn fs_spec(in: VsSpecOut) -> @location(0) vec4<f32> {
     if material.bump.x > 0.5 {
         let texel = textureSample(t_bump, s_color, material_uv(in.uv));
         add = pc_bump_spec(in, bump_frame(in.world_pos, in.world_normal, in.uv, texel));
+    } else if material.bump.y > 0.5 {
+        add = pc_env_spec(in);
     } else {
-        let t = textureSample(t_spec, s_spec, in.spec_uv).r;
+        let t = textureSample(t_spec, s_spec, in.spec_uv.xy).r;
         add = min(t * in.spec_rgb, vec3<f32>(1.0)) * clamp(base.a, 0.0, 1.0);
     }
     let before = clamp(base.rgb, vec3<f32>(0.0), vec3<f32>(1.0));

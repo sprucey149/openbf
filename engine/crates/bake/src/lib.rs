@@ -24,6 +24,7 @@ pub mod droid_chunks;
 pub mod droideka;
 pub mod effects;
 pub mod entity_light;
+pub mod envmap;
 pub mod far_lowd;
 pub mod foley;
 pub mod foliage;

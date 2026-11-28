@@ -62,6 +62,8 @@ impl Renderer {
                 bindings::texture_layout(4, true),
                 // PC normal map (`crate::BumpDesc`); the base view without one.
                 bindings::texture_layout(5, true),
+                // PC environment cube (`crate::EnvDesc`); the blank one without.
+                bindings::cube_layout(6),
             ],
         });
 
@@ -745,10 +747,12 @@ impl Renderer {
         };
         let depth_view = create_depth_texture(&device, w, h);
 
+        let no_env = crate::texture::blank_cube(&device);
         let white = GpuTexture::upload(
             &device,
             &queue,
             &texture_bgl,
+            &no_env,
             &TextureDesc {
                 width: 1,
                 height: 1,
@@ -758,6 +762,7 @@ impl Renderer {
                 srgb: false,
                 detail: None,
                 bump: None,
+                env: None,
                 scroll: [0.0, 0.0],
                 uv_scale: [1.0, 1.0],
                 label: Some("white"),
@@ -797,6 +802,7 @@ impl Renderer {
             point_lights: Vec::new(),
             point_table_clear: true,
             texture_bgl,
+            no_env,
             meshes: Vec::new(),
             textures: Vec::new(),
             white,

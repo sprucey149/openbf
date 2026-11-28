@@ -186,3 +186,47 @@ fn standalone_registration_respects_dependency_guard() {
         .collect();
     assert_eq!(registered, ["democ_con"]);
 }
+
+#[test]
+fn a_generic_for_visits_each_entry_then_leaves_the_loop() {
+    let rk = 128;
+    let constants = [
+        LuaConst::Num(1.0),
+        LuaConst::Str("first".into()),
+        LuaConst::Num(2.0),
+        LuaConst::Str("second".into()),
+        LuaConst::Str("pairs".into()),
+        LuaConst::Str("AddDownloadableContent".into()),
+        LuaConst::Str("after".into()),
+    ];
+    // local t = { "first", "second" }
+    // for k, v in pairs(t) do AddDownloadableContent(v) end
+    // AddDownloadableContent("after")
+    let code = [
+        ins_abx(Op50::NewTable, 0, 0),
+        ins_abc(Op50::SetTable, 0, rk, rk + 1),
+        ins_abc(Op50::SetTable, 0, rk + 2, rk + 3),
+        ins_abx(Op50::GetGlobal, 1, 4),
+        ins_abc(Op50::Move, 2, 0, 0),
+        ins_abc(Op50::Call, 1, 2, 5),
+        ins_abx(Op50::TForPrep, 1, 131_071 + 3),
+        ins_abx(Op50::GetGlobal, 5, 5),
+        ins_abc(Op50::Move, 6, 4, 0),
+        ins_abc(Op50::Call, 5, 2, 1),
+        ins_abc(Op50::TForLoop, 1, 0, 1),
+        ins_abx(Op50::Jmp, 0, 131_071 - 5),
+        ins_abx(Op50::GetGlobal, 5, 5),
+        ins_abx(Op50::LoadK, 6, 6),
+        ins_abc(Op50::Call, 5, 2, 1),
+        ins_abc(Op50::Return, 0, 1, 0),
+    ];
+    let env = evaluate_standalone_registration(undump(&make_chunk(&constants, &code)).unwrap());
+    let passed: Vec<_> = env
+        .calls
+        .iter()
+        .filter(|call| call.func == "AddDownloadableContent")
+        .filter_map(|call| call.args[0].as_str())
+        .collect();
+    assert_eq!(passed, ["first", "second", "after"]);
+    assert!(env.warnings.is_empty(), "{:?}", env.warnings);
+}

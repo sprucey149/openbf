@@ -1279,9 +1279,12 @@ impl Sim {
                     // The zoom press and its cancels, then the turn: zoomed,
                     // the yaw and pitch rates are divided by the weapon's
                     // turn divisor (`re-zoom.md` §4, §6).
+                    // A melee weapon holds the view in third person; tracked
+                    // VR, which has no third person, is exempt [ours].
                     self.units[i].first_person =
                         matches!(self.units[i].controller, Controller::Player { .. })
-                            && pad_i.pressed(buttons::FIRST_PERSON);
+                            && pad_i.pressed(buttons::FIRST_PERSON)
+                            && (pad_i.tracked_combat.is_some() || !self.holds_melee(i));
                     self.tick_zoom(i, pad_i);
                     if let Some(z) = self.units[i].zoom {
                         consts.max_turn_speed /= z.divisor;

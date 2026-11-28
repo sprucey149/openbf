@@ -2250,6 +2250,7 @@ version = "0.1.0"
 dependencies = [
  "extensions",
  "flate2",
+ "manifest",
  "ron",
  "serde",
  "serde_json",

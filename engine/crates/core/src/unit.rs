@@ -1407,6 +1407,11 @@ impl UnitSpec {
         for (i, w) in held.iter_mut().enumerate() {
             w.state.active = Some(i) == cur1;
         }
+        let mut health = Health::new(self.max_health, self.health_type);
+        if self.consts.max_shield > 0.0 {
+            health.shield_max = self.consts.max_shield;
+            health.shield = self.consts.max_shield;
+        }
         Unit {
             choked: None,
             burn: None,
@@ -1417,7 +1422,7 @@ impl UnitSpec {
             controller: self.controller,
             soldier,
             consts: self.consts,
-            health: Health::new(self.max_health, self.health_type),
+            health,
             weapon: WeaponState::with_clips(class, self.is_player(), self.total_clips),
             weapon_class: self.weapon_class,
             weapon_slot: self.weapon_slot,

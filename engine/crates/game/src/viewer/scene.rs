@@ -1186,6 +1186,7 @@ fn get_terrain_texture(
     let handle = r
         .add_texture(&render::TextureDesc {
             bump: None,
+            env: None,
             width: base.width,
             height: base.height,
             mips: &mips,

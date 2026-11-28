@@ -11,6 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// File name of the persistent extension activation profile inside `openbf_data/`.
 pub const PROFILE_FILE: &str = "extensions.ron";
+/// File name of the launcher's persistent configuration inside `openbf_data/`.
+pub const LAUNCHER_CONFIG_FILE: &str = "launcher.ron";
 /// File name of the last extension startup failure report inside `openbf_data/`.
 pub const STARTUP_ERROR_FILE: &str = "last_startup_error.ron";
 /// Subdirectory under `openbf_data/` containing user-copied legacy BF2 mod folders.
@@ -21,11 +23,55 @@ pub const MOD_CACHE_DIR: &str = "mod_cache";
 pub const DATA_DIR_ENV: &str = "OPENBF_DATA_DIR";
 /// Environment variable set by the launcher when spawning `openbf`.
 pub const LAUNCHED_BY_LAUNCHER_ENV: &str = "OPENBF_LAUNCHED_BY_LAUNCHER";
+/// Set by the launcher when Instant Action lists its maps in per-source folders.
+pub const GROUP_MAPS_ENV: &str = "OPENBF_GROUP_MAPS";
 
 const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 fn default_schema_version() -> u32 {
     CURRENT_SCHEMA_VERSION
+}
+
+/// Subset of `openbf_data/launcher.ron` that affects direct `openbf` launches.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct LauncherRuntimeConfig {
+    #[serde(default)]
+    pub graphics_api: LauncherGraphicsApi,
+    #[serde(default)]
+    pub group_maps_by_source: bool,
+}
+
+/// Graphics API override written by `openbf-launcher` into `launcher.ron`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+pub enum LauncherGraphicsApi {
+    #[default]
+    Auto,
+    Vulkan,
+    Dx12,
+    Metal,
+}
+
+impl LauncherGraphicsApi {
+    pub fn wgpu_backend(self) -> Option<&'static str> {
+        match self {
+            Self::Auto => None,
+            Self::Vulkan => Some("vulkan"),
+            Self::Dx12 => Some("dx12"),
+            Self::Metal => Some("metal"),
+        }
+    }
+}
+
+impl LauncherRuntimeConfig {
+    /// Load runtime options from `<data_dir>/launcher.ron`, returning defaults
+    /// when missing or unreadable.
+    pub fn load(data_dir: &Path) -> Self {
+        let path = data_dir.join(LAUNCHER_CONFIG_FILE);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Self::default();
+        };
+        ron::from_str(&text).unwrap_or_default()
+    }
 }
 
 /// Persistent user configuration storing enabled extensions and optional order.
@@ -491,6 +537,31 @@ mod tests {
             ["content.c", "content.b"]
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn launcher_runtime_config_reads_launcher_ron_fields_and_ignores_others() {
+        let dir = std::env::temp_dir().join(format!(
+            "openbf-launcher-cfg-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(LAUNCHER_CONFIG_FILE);
+        assert_eq!(
+            LauncherRuntimeConfig::load(&dir),
+            LauncherRuntimeConfig::default()
+        );
+        std::fs::write(
+            &path,
+            "(bf1: (platform: Pc, paths: {}), graphics_api: Vulkan, group_maps_by_source: true)",
+        )
+        .unwrap();
+        let cfg = LauncherRuntimeConfig::load(&dir);
+        assert_eq!(cfg.graphics_api, LauncherGraphicsApi::Vulkan);
+        assert_eq!(cfg.graphics_api.wgpu_backend(), Some("vulkan"));
+        assert!(cfg.group_maps_by_source);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

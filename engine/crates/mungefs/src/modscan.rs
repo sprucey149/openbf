@@ -130,8 +130,10 @@ fn map_summaries(insp: &AddonInspection, namespace: &str) -> Vec<ModMapSummary> 
             description: g.description.clone(),
             source_lvl: g.source_lvl_rel.clone(),
             variant_title: g.variant_title.clone(),
+            stock_row: g.stock_row.clone(),
             modes_cw: g.modes_cw.clone(),
             modes_gcw: g.modes_gcw.clone(),
+            modes_custom_eras: g.modes_custom_eras.clone(),
             missions: g
                 .missions
                 .iter()
@@ -147,6 +149,7 @@ fn map_summaries(insp: &AddonInspection, namespace: &str) -> Vec<ModMapSummary> 
                 })
                 .collect(),
             sound_planets: g.sound_planets.clone(),
+            era_overrides: g.era_overrides.clone(),
         })
         .collect()
 }
@@ -348,12 +351,12 @@ pub fn inspect_mod_folder(
     let mut capabilities: BTreeSet<Capability> = mod_capabilities(&ops).into_iter().collect();
     capabilities.extend(discovered.capabilities.drain(..));
     let active = ops.iter().filter(|o| o.is_active()).count();
-    let ambiguous = ops.iter().filter(|o| o.status.needs_user()).count();
+    let ambiguous = ops.iter().filter(|o| o.status.is_ambiguous()).count();
 
     let warnings = &mut discovered.warnings;
     if ambiguous > 0 {
         warnings.push(format!(
-            "{ambiguous} LVL file(s) could match more than one stock file; choose their targets in the Mods tab."
+            "{ambiguous} LVL file(s) match no single stock file clearly and are kept stock."
         ));
     }
     let gameplay: Vec<&ResourceOp> = ops

@@ -7,8 +7,13 @@ impl Ctx<'_> {
     pub(super) fn general(&mut self, _it: &mut Interp, name: &str, a: &[Value]) -> Option<Ret> {
         let w = &mut *self.w;
         Some(match name {
-            "IsCampaign" => one(Value::Bool(true)),
-            "IsMultiplayerGametype" => one(Value::Bool(false)),
+            "IsCampaign" => one(Value::Bool(w.is_campaign)),
+            "IsMultiplayerGametype" | "ScriptCB_InMultiplayer" | "ScriptCB_InNetGame" => {
+                one(Value::Bool(w.setup_multiplayer))
+            }
+            "ScriptCB_GetPlatform" => one(Value::str("PC")),
+            "ScriptCB_GetNumCameras" => one(Value::Num(1.0)),
+            "ScriptCB_GetDateStr" => one(Value::str("01/01/2005")),
             "ScriptCB_IsMissionSetupSaved" => one(Value::Bool(false)),
             "GetWorldFilename" => one(Value::str(&w.map)),
             "ScriptCB_GetMissionTime" => one(Value::Num(w.time)),

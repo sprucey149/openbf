@@ -142,6 +142,16 @@ fn resolve_startup_in(
         }
     };
 
+    // Apply persisted launcher runtime options (e.g. graphics_api) on direct
+    // launches when the caller did not already pass `WGPU_BACKEND` and VR is
+    // not active (OpenXR requires Vulkan).
+    if interactive && early_display.is_none() && std::env::var_os("WGPU_BACKEND").is_none() {
+        let launcher_cfg = extensions::profile::LauncherRuntimeConfig::load(&data_dir);
+        if let Some(backend) = launcher_cfg.graphics_api.wgpu_backend() {
+            std::env::set_var("WGPU_BACKEND", backend);
+        }
+    }
+
     Ok(ResolvedStartup {
         data_dir,
         display_ext_meta,

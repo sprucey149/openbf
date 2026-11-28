@@ -223,8 +223,16 @@ impl VehicleSides {
                             .join(format!("{game}_{}.ron", m.source));
                         // A map LVL's own vehicles (TAT1's skiff) keep their
                         // seats in the map's class file, not a side's.
-                        if db.load(&side_classes).is_err() {
-                            let _ = db.load_map(&assets_dir.join(&m.source));
+                        if db.load(&side_classes).is_err()
+                            && db.load_map(&assets_dir.join(&m.source)).unwrap_or(0) == 0
+                        {
+                            // A mod map's own side (`bake mod-convert`) has
+                            // its classes in the shared file.
+                            let _ = db.load(
+                                &assets_dir
+                                    .join("classes")
+                                    .join(format!("{game}_ingame.ron")),
+                            );
                         }
                         let walker_seats = m
                             .vehicles

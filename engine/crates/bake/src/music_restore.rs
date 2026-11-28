@@ -67,7 +67,7 @@ fn restore_take(take: StreamTake, path: PathBuf, worker: &mut AudioRestore) -> R
 fn write_flac(path: PathBuf, rate: u32, pcm: &[i16]) -> Result<u64> {
     std::fs::create_dir_all(path.parent().context("music output path has no parent")?)?;
     let scratch = path.with_extension("flac.tmp");
-    let mut encoder = Command::new("ffmpeg")
+    let mut encoder = Command::new(crate::ogg::ffmpeg_bin())
         .args([
             "-nostdin",
             "-hide_banner",

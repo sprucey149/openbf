@@ -275,6 +275,9 @@ pub struct RoundSetup {
     pub mode: String,
     /// The playlist row's armies, before the mission pick orders them.
     pub armies: [String; 2],
+    /// Canonical era code (`"cw"`, `"gcw"`, or custom code) for `Side::Era`, `None` for cross-era.
+    #[serde(default)]
+    pub era: Option<String>,
     pub seed: u32,
     pub difficulty: core::skill::Difficulty,
     pub options: RoundOptions,
@@ -305,6 +308,7 @@ impl RoundSetup {
             map: map.to_owned(),
             mode: mode.to_owned(),
             armies,
+            era: None,
             seed: 42u32.wrapping_add(host.career.rounds),
             difficulty: host.settings.difficulty,
             options: RoundOptions::from_session(session),

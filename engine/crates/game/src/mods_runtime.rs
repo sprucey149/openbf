@@ -21,7 +21,7 @@ use extensions::mods::{
 use extensions::profile::{mods_dir, profile_path, ExtensionProfile};
 use manifest::hud::HudLocl;
 use pak::{clear_overlays, set_overlays, OverlayLayer, OverlayRule};
-use ui::shell::{ModMapEntry, Mode, MODES};
+use ui::shell::{Era, ModMapEntry, Mode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MountedMod {
@@ -47,6 +47,11 @@ pub struct MountedModsReport {
     pub disabled: bool,
     pub active: Vec<MountedMod>,
     pub mod_maps: Vec<ModMapEntry>,
+    pub custom_modes: BTreeMap<String, extensions::mods::ModModeMeta>,
+    pub shell_icon_dirs: Vec<PathBuf>,
+    /// Each mod's own places for weapon models in the HUD's weapon rows, in
+    /// load order.
+    pub hud_icon_places: Vec<manifest::hud::HudLayout>,
     pub active_fingerprints: Vec<(String, String)>,
     pub override_digest: String,
     pub conflicts: Vec<ResourceOverrideConflict>,
@@ -58,6 +63,9 @@ static RUNTIME_STATE: RwLock<MountedModsReport> = RwLock::new(MountedModsReport 
     disabled: false,
     active: Vec::new(),
     mod_maps: Vec::new(),
+    custom_modes: BTreeMap::new(),
+    shell_icon_dirs: Vec::new(),
+    hud_icon_places: Vec::new(),
     active_fingerprints: Vec::new(),
     override_digest: String::new(),
     conflicts: Vec::new(),
@@ -74,25 +82,91 @@ pub fn active_mod_maps() -> Vec<ModMapEntry> {
         .clone()
 }
 
-fn catalog_entries(maps: &[ModMapSummary], folder: &str) -> Vec<ModMapEntry> {
+/// Snapshot of active mod-declared custom mode metadata (`addme.script` `change.mode_*`).
+pub fn active_custom_modes() -> BTreeMap<String, extensions::mods::ModModeMeta> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .custom_modes
+        .clone()
+}
+
+/// Directories containing baked custom shell/mode icon KTX2s from active mods (priority order).
+pub fn active_shell_icon_dirs() -> Vec<PathBuf> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .shell_icon_dirs
+        .clone()
+}
+
+/// The active mods' places for weapon models in the HUD's weapon rows.
+pub fn active_hud_icon_places() -> Vec<manifest::hud::HudLayout> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .hud_icon_places
+        .clone()
+}
+
+fn catalog_entries(maps: &[ModMapSummary], folder: &str, source: &str) -> Vec<ModMapEntry> {
     let mut entries: Vec<ModMapEntry> = Vec::new();
     let mut groups = BTreeMap::new();
     for map in maps {
-        let modes = [
-            parse_modes_list(&map.modes_cw),
-            parse_modes_list(&map.modes_gcw),
-        ];
-        if let Some(title) = &map.variant_title {
-            let group = (map.source_lvl.as_str(), title.as_str());
+        let mut modes: BTreeMap<Era, Vec<Mode>> = BTreeMap::new();
+        let cw = parse_modes_list(&map.modes_cw);
+        if !cw.is_empty() {
+            modes.insert(Era::Cw, cw);
+        }
+        let gcw = parse_modes_list(&map.modes_gcw);
+        if !gcw.is_empty() {
+            modes.insert(Era::Gcw, gcw);
+        }
+        for (era_code, mode_list) in &map.modes_custom_eras {
+            if let Some(era) = Era::from_code(era_code) {
+                let parsed = parse_modes_list(mode_list);
+                if !parsed.is_empty() {
+                    let slot = modes.entry(era).or_default();
+                    for mode in parsed {
+                        if !slot.contains(&mode) {
+                            slot.push(mode);
+                        }
+                    }
+                }
+            }
+        }
+        let mut era_overrides: BTreeMap<Era, ui::shell::EraOverride> = BTreeMap::new();
+        for (era_code, ov) in &map.era_overrides {
+            if let Some(era) = Era::from_code(era_code) {
+                era_overrides.insert(
+                    era,
+                    ui::shell::EraOverride {
+                        name: ov.name.clone(),
+                        icon: ov.icon.clone(),
+                    },
+                );
+            }
+        }
+        // Every world a mod lists on a stock map's row shares one entry.
+        let group = match (&map.stock_row, &map.variant_title) {
+            (Some(code), _) => Some(("", code.as_str())),
+            (None, Some(title)) => Some((map.source_lvl.as_str(), title.as_str())),
+            (None, None) => None,
+        };
+        if let Some(group) = group {
             if let Some(&index) = groups.get(&group) {
                 let entry: &mut ModMapEntry = &mut entries[index];
                 entry.variant_keys.push(map.map_key.clone());
-                for (all, variant) in entry.modes.iter_mut().zip(modes) {
+                for (era, variant) in modes {
+                    let all = entry.modes.entry(era).or_default();
                     for mode in variant {
                         if !all.contains(&mode) {
                             all.push(mode);
                         }
                     }
+                }
+                for (era, ov) in era_overrides {
+                    entry.era_overrides.entry(era).or_insert(ov);
                 }
                 continue;
             }
@@ -100,6 +174,7 @@ fn catalog_entries(maps: &[ModMapSummary], folder: &str) -> Vec<ModMapEntry> {
         }
         entries.push(ModMapEntry {
             key: map.map_key.clone(),
+            stock_row: map.stock_row.clone(),
             legacy_code: map.legacy_code.clone(),
             name: map
                 .variant_title
@@ -107,8 +182,10 @@ fn catalog_entries(maps: &[ModMapSummary], folder: &str) -> Vec<ModMapEntry> {
                 .unwrap_or(&map.display_name)
                 .clone(),
             disambiguator: folder.to_owned(),
+            source: source.to_owned(),
             description: map.description.clone(),
             modes,
+            era_overrides,
             variant_keys: vec![map.map_key.clone()],
         });
     }
@@ -120,26 +197,85 @@ pub fn select_world_variant(
     key: &str,
     mode: &str,
     armies: &[String; 2],
+    era: Option<&str>,
     seed: u32,
     multiplayer: bool,
 ) -> String {
     let state = RUNTIME_STATE.read().unwrap_or_else(|e| e.into_inner());
-    let Some(row) = state
+    let maps = || state.active.iter().flat_map(|m| &m.maps);
+    let era = era.unwrap_or_else(|| {
+        if armies.iter().any(|a| a == "rep" || a == "cis") {
+            "cw"
+        } else {
+            "gcw"
+        }
+    });
+    let choose = |row| choose_world_variant(row, maps(), mode, era, seed, multiplayer);
+    if let Some(row) = state.mod_maps.iter().find(|row| row.key == key) {
+        if row.variant_keys.len() > 1 {
+            return choose(row).unwrap_or(key).to_owned();
+        }
+        return key.to_owned();
+    }
+    // A stock map's row: the first mod in load order that lists this mode and
+    // era on it supplies the round's map. Otherwise the stock one plays.
+    let code = key.strip_prefix("bf2_").unwrap_or(key);
+    state
         .mod_maps
         .iter()
-        .find(|row| row.key == key && row.variant_keys.len() > 1)
-    else {
-        return key.to_owned();
-    };
-    let maps = state.active.iter().flat_map(|m| &m.maps);
-    let era = if armies.iter().any(|a| a == "rep" || a == "cis") {
-        "cw"
-    } else {
-        "gcw"
-    };
-    choose_world_variant(row, maps, mode, era, seed, multiplayer)
+        .filter(|row| row.stock_row.as_deref() == Some(code))
+        .find_map(choose)
         .unwrap_or(key)
         .to_owned()
+}
+
+/// The mission file a round of `map` plays, when the addon script behind
+/// `picked` set up more than one roster: a multiplayer round takes the
+/// script's multiplayer run, a single-player one rolls by the runs' weights.
+/// `None` keeps `picked`.
+pub fn select_roster(map: &str, picked: &str, seed: u32, multiplayer: bool) -> Option<String> {
+    let state = RUNTIME_STATE.read().unwrap_or_else(|e| e.into_inner());
+    let summary = state
+        .active
+        .iter()
+        .flat_map(|m| &m.maps)
+        .find(|m| m.map_key == map)?;
+    choose_roster(&summary.missions, picked, seed, multiplayer)
+        .filter(|file| *file != picked)
+        .map(str::to_owned)
+}
+
+fn choose_roster<'a>(
+    missions: &'a [extensions::mods::ModMissionSummary],
+    picked: &str,
+    seed: u32,
+    multiplayer: bool,
+) -> Option<&'a str> {
+    let script = &missions
+        .iter()
+        .find(|m| m.mission_ron == picked)?
+        .script_name;
+    let runs = || {
+        missions
+            .iter()
+            .filter(move |m| m.supported && m.script_name == *script)
+    };
+    if multiplayer {
+        return runs()
+            .find(|m| m.multiplayer_variant)
+            .map(|m| m.mission_ron.as_str());
+    }
+    let candidates: Vec<&str> = runs()
+        .flat_map(|m| {
+            std::iter::repeat_n(m.mission_ron.as_str(), usize::from(m.single_player_weight))
+        })
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    // OURS: its own stream, so the troops do not follow the world variant's draw.
+    let draw = core::rng::SimRng::new(seed ^ 0x7200_5EED).next_rand() as usize;
+    Some(candidates[draw % candidates.len()])
 }
 
 fn choose_world_variant<'a>(
@@ -322,10 +458,7 @@ pub fn convert_mod_with_bake(
 fn parse_modes_list(strs: &[String]) -> Vec<Mode> {
     let mut out = Vec::new();
     for s in strs {
-        if let Some(m) = MODES
-            .into_iter()
-            .find(|cand| cand.subst().eq_ignore_ascii_case(s))
-        {
+        if let Some(m) = Mode::from_subst(s) {
             if !out.contains(&m) {
                 out.push(m);
             }
@@ -393,6 +526,7 @@ fn load_cached_or_convert(
         ));
         return None;
     };
+    set_converting(Some(entry.folder_name.clone()));
     println!(
         "mods: preparing `{}` ({}) -> {}",
         entry.folder_name,
@@ -472,6 +606,69 @@ fn discovered_from_cache(entry: &ModFolderEntry, meta: &ModCacheMeta) -> Discove
     }
 }
 
+/// The layer of a converted map's own units and classes
+/// (`levels/<map>/`, `bake mod-convert`), served only while that map is
+/// loaded; `None` for a map with no SIDE LVLs of its own.
+fn level_layer(mod_id: &str, cache_dir: &Path, map_key: &str) -> Option<OverlayLayer> {
+    let root = cache_dir.join("levels").join(map_key);
+    let assets = root.join("assets");
+    let mut entries: BTreeMap<String, Option<PathBuf>> = BTreeMap::new();
+    // The stock companions the addon's version of a model does not have.
+    let removed: Vec<String> = std::fs::read_to_string(root.join("removed.ron"))
+        .ok()
+        .and_then(|t| ron::from_str(&t).ok())
+        .unwrap_or_default();
+    for rel in removed {
+        entries.insert(rel.to_ascii_lowercase(), None);
+    }
+    let mut pending = vec![assets.clone()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            // The listing already says which entries are folders; asking
+            // each path again costs a disk query per file, and a large mod
+            // has tens of thousands. (A cache holds no links.)
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                pending.push(path);
+            } else if let Ok(rel) = path.strip_prefix(&assets) {
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                entries.insert(rel.to_ascii_lowercase(), Some(path));
+            }
+        }
+    }
+    (!entries.is_empty()).then(|| OverlayLayer {
+        id: mod_id.to_owned(),
+        mount_name: "assets_baked".into(),
+        rule: OverlayRule::Overrides {
+            entries,
+            scope: Some(format!("{}{}", pak::LEVEL_SCOPE, map_key.to_ascii_lowercase())),
+        },
+    })
+}
+
+/// What [`mount_enabled_mods`] is doing, for the title screen to show.
+#[derive(Clone, Default)]
+pub struct MountStatus {
+    /// The folder of the mod being converted, which takes minutes.
+    pub converting: Option<String>,
+}
+
+static MOUNT_STATUS: RwLock<MountStatus> = RwLock::new(MountStatus { converting: None });
+
+pub fn mount_status() -> MountStatus {
+    MOUNT_STATUS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+fn set_converting(mod_folder: Option<String>) {
+    MOUNT_STATUS
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .converting = mod_folder;
+}
+
 /// Scan `openbf_data/mods/`, ensure caches for enabled mods from `extensions.ron`,
 /// validate dependencies and load order, and mount VFS & localization overlays.
 pub fn mount_enabled_mods(
@@ -537,6 +734,7 @@ pub fn mount_enabled_mods(
         let Some(entry) = by_id.get(mod_id) else {
             continue;
         };
+        set_converting(None);
         if let Some((meta, cache_dir)) =
             load_cached_or_convert(entry, data_dir, &inputs, &mut report)
         {
@@ -572,7 +770,10 @@ pub fn mount_enabled_mods(
         eprintln!("mods: {err}");
     }
 
+    set_converting(None);
     let mut overlays: Vec<OverlayLayer> = Vec::new();
+    // Each addon map's own units stand over everything else on that map.
+    let mut level_layers: Vec<OverlayLayer> = Vec::new();
     let mut locls: Vec<Arc<HudLocl>> = Vec::new();
 
     for mod_id in &plan.active_order {
@@ -593,9 +794,14 @@ pub fn mount_enabled_mods(
                 });
             }
         }
-        report
-            .mod_maps
-            .extend(catalog_entries(&meta.maps, &entry.folder_name));
+        for map in &meta.maps {
+            level_layers.extend(level_layer(mod_id, cache_dir, &map.map_key));
+        }
+        report.mod_maps.extend(catalog_entries(
+            &meta.maps,
+            &entry.folder_name,
+            &meta.display_name,
+        ));
 
         let missions_cache = cache_dir.join("missions");
         if missions_cache.is_dir() {
@@ -664,6 +870,40 @@ pub fn mount_enabled_mods(
             });
         }
 
+        if meta.has_shell_icons {
+            let icon_dir = cache_dir
+                .join("assets")
+                .join(format!("{}__shell_icons", meta.namespace));
+            if icon_dir.is_dir() {
+                report.shell_icon_dirs.push(icon_dir);
+            }
+        }
+        for (mode_key, mode_meta) in &meta.custom_modes {
+            let entry_meta = report
+                .custom_modes
+                .entry(mode_key.to_ascii_lowercase())
+                .or_default();
+            if entry_meta.name.is_none() {
+                entry_meta.name = mode_meta.name.clone();
+            }
+            if entry_meta.description.is_none() {
+                entry_meta.description = mode_meta.description.clone();
+            }
+            if entry_meta.icon.is_none() {
+                entry_meta.icon = mode_meta.icon.clone();
+            }
+        }
+
+        let places = cache_dir.join("hud").join("weapon_icons.ron");
+        if let Ok(text) = std::fs::read_to_string(&places) {
+            match ron::from_str(&text) {
+                Ok(places) => report.hud_icon_places.push(places),
+                Err(e) => report
+                    .warnings
+                    .push(format!("{}: {e}", places.display())),
+            }
+        }
+
         if meta.has_locl {
             let locl_path = cache_dir.join("locl").join("english.ron");
             if let Ok(text) = std::fs::read_to_string(&locl_path) {
@@ -730,7 +970,8 @@ pub fn mount_enabled_mods(
         format!("{digest:016x}")
     };
 
-    set_overlays(overlays);
+    level_layers.append(&mut overlays);
+    set_overlays(level_layers);
     crate::event_feed::set_mod_locls(locls);
 
     if !report.active.is_empty() {
@@ -754,13 +995,44 @@ pub fn mount_enabled_mods(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
     use extensions::mods::{
         compute_mod_fingerprint, ModContentType, ModMissionSummary, ReplacementOutput,
         MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_ID,
     };
     use extensions::profile::ExtensionProfile;
+    use std::collections::BTreeSet;
     use std::sync::Mutex;
+
+    #[test]
+    fn a_picked_mission_is_drawn_among_its_scripts_rosters() {
+        let row = |file: &str, script: &str, weight: u8, multiplayer: bool| ModMissionSummary {
+            script_name: script.into(),
+            mode: "con".into(),
+            era: "gcw".into(),
+            mission_ron: file.into(),
+            single_player_weight: weight,
+            multiplayer_variant: multiplayer,
+            supported: true,
+            unsupported_reason: None,
+        };
+        let rows = [
+            row("a.ron", "abrg_con", 1, false),
+            row("b.ron", "abrg_con", 2, false),
+            row("online.ron", "abrg_con", 0, true),
+            row("other.ron", "abrg_ctf", 1, true),
+        ];
+        assert_eq!(choose_roster(&rows, "a.ron", 7, true), Some("online.ron"));
+        let drawn: BTreeSet<&str> = (0..64)
+            .filter_map(|seed| choose_roster(&rows, "a.ron", seed, false))
+            .collect();
+        assert_eq!(drawn, BTreeSet::from(["a.ron", "b.ron"]));
+        assert_eq!(
+            choose_roster(&rows, "a.ron", 11, false),
+            choose_roster(&rows, "b.ron", 11, false),
+            "one seed, one draw, whichever row was picked"
+        );
+        assert_eq!(choose_roster(&rows, "missing.ron", 7, false), None);
+    }
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -830,8 +1102,10 @@ mod tests {
                 description: String::new(),
                 source_lvl: "ABR/ABR.lvl".into(),
                 variant_title: None,
+                stock_row: None,
                 modes_cw: Vec::new(),
                 modes_gcw: vec!["con".into()],
+                modes_custom_eras: BTreeMap::new(),
                 missions: vec![ModMissionSummary {
                     script_name: format!("{ns}_con"),
                     mode: "con".into(),
@@ -843,6 +1117,7 @@ mod tests {
                     unsupported_reason: None,
                 }],
                 sound_planets: Vec::new(),
+                era_overrides: BTreeMap::new(),
             }],
             dependencies: Vec::new(),
             conflicts: Vec::new(),
@@ -855,6 +1130,8 @@ mod tests {
             unsupported: Vec::new(),
             catalog_digest: StockCatalogs::digest_with(&|_| None),
             target_choices: BTreeMap::new(),
+            custom_modes: BTreeMap::new(),
+            has_shell_icons: false,
         };
         meta.save_atomic(&cache).unwrap();
     }
@@ -865,7 +1142,7 @@ mod tests {
         let data = PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_DATA").unwrap());
         let cache = data.join("mod_cache/mod_kth");
         let meta = ModCacheMeta::load(&cache).unwrap();
-        let rows = catalog_entries(&meta.maps, "KTH");
+        let rows = catalog_entries(&meta.maps, "KTH", "KTH");
         assert_eq!(rows.len(), 1);
         use ui::shell::{IaCommand, IaInput, IaTexts, InstantAction, ModePick, PointerTarget};
         let missions = cache.join("missions");
@@ -1123,6 +1400,8 @@ mod tests {
             unsupported: Vec::new(),
             catalog_digest: stock_catalog_digest(&assets),
             target_choices: BTreeMap::new(),
+            custom_modes: BTreeMap::new(),
+            has_shell_icons: false,
         };
         meta.save_atomic(&cache).unwrap();
 

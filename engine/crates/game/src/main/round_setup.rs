@@ -26,14 +26,54 @@ pub(super) fn shell_setup(
     name: &str,
     mode: &str,
     row_armies: &[String; 2],
+    era: Option<&str>,
     session: &ui::shell::SessionOptions,
     seed: u32,
     difficulty: core::skill::Difficulty,
 ) -> Result<BattleSetup> {
+    setup_for(
+        missions_dir,
+        assets_dir,
+        name,
+        mode,
+        row_armies,
+        era,
+        session,
+        seed,
+        difficulty,
+        false,
+    )
+}
+
+/// [`shell_setup`] for a single-player or a `multiplayer` round, which
+/// an addon script may set up differently.
+#[allow(clippy::too_many_arguments)]
+fn setup_for(
+    missions_dir: &Path,
+    assets_dir: &Path,
+    name: &str,
+    mode: &str,
+    row_armies: &[String; 2],
+    era: Option<&str>,
+    session: &ui::shell::SessionOptions,
+    seed: u32,
+    difficulty: core::skill::Difficulty,
+    multiplayer: bool,
+) -> Result<BattleSetup> {
     let armies = [row_armies[0].as_str(), row_armies[1].as_str()];
     let xl = mode == ui::shell::Mode::Xl.subst();
     let mission_mode = if xl { "con" } else { mode };
-    let pick = game::mission::pick(missions_dir, name, mission_mode, armies);
+    let mut pick = game::mission::pick_for_era(missions_dir, name, mission_mode, armies, era);
+    // An addon script that rolls its troops has one mission file per roll.
+    if let Some(p) = pick.as_mut() {
+        let rolled = super::file_name(&p.path)
+            .and_then(|f| game::mods_runtime::select_roster(name, &f, seed, multiplayer));
+        if let Some(file) = rolled {
+            let path = missions_dir.join(file);
+            p.mission = game::mission::MissionDef::load(&path)?;
+            p.path = path;
+        }
+    }
     if xl {
         let code = name.strip_prefix("bf2_").unwrap_or(name);
         anyhow::ensure!(
@@ -167,15 +207,17 @@ pub(super) fn battle_setup(
     let session = round
         .options
         .to_session(ui::shell::SessionOptions::default());
-    let mut setup = shell_setup(
+    let mut setup = setup_for(
         missions_dir,
         assets_dir,
         &round.map,
         &round.mode,
         &round.armies,
+        round.era.as_deref(),
         &session,
         round.seed,
         round.difficulty,
+        true,
     )?;
     // Issue #171: the LAN marker from the opening wave on, and the
     // opening wave counts every round-start human, not only slot 0.
@@ -301,6 +343,7 @@ pub(super) fn mission_layers_for(
     map: &str,
     mode: &str,
     armies: Option<&[String; 2]>,
+    era: Option<&str>,
     script: Option<&str>,
 ) -> Vec<String> {
     if mode.eq_ignore_ascii_case("campaign") {
@@ -314,7 +357,8 @@ pub(super) fn mission_layers_for(
     let pair = armies
         .map(|a| [a[0].as_str(), a[1].as_str()])
         .unwrap_or(["", ""]);
-    game::mission::pick(missions_dir, map, mission_mode, pair)
+    // A custom era's mission is found only by its era, as the setup picks it.
+    game::mission::pick_for_era(missions_dir, map, mission_mode, pair, era)
         .map(|p| p.mission.layers)
         .unwrap_or_default()
 }
@@ -337,6 +381,7 @@ pub(super) fn rebuilder(
                 &round.map,
                 &round.mode,
                 Some(&round.armies),
+                round.era.as_deref(),
                 None,
             );
             let (mut scene, load) =
@@ -345,6 +390,7 @@ pub(super) fn rebuilder(
                 &missions_dir,
                 &round.map,
                 &round.mode,
+                round.era.as_deref(),
             ));
             if let Some((path, Err(error))) = load.common {
                 anyhow::bail!("common assets at {} unreadable: {error:#}", path.display());
@@ -418,8 +464,8 @@ mod tests {
         let difficulty = core::skill::Difficulty::Normal;
         let mode = Mode::Xl;
         let mut ia = game::shell_ia::instant_action(&assets, missions, difficulty);
-        assert_eq!(ia.texts.mode(mode).0, "XL");
-        ia.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        assert_eq!(ia.texts.mode(&mode).0, "XL");
+        ia.add(MapPick::All, ModePick::One(mode.clone()), SidePick::AllEras);
         let rows = ia.launch();
         let mut pairs: Vec<_> = rows
             .iter()
@@ -436,7 +482,7 @@ mod tests {
             ]
         );
         let mut lobby = game::shell_ia::lobby_instant_action(&assets, missions, difficulty);
-        lobby.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        lobby.add(MapPick::All, ModePick::One(mode.clone()), SidePick::AllEras);
         assert!(lobby.launch().is_empty());
 
         for row in rows {
@@ -457,6 +503,7 @@ mod tests {
                     &row.key,
                     mode.subst(),
                     &row.armies,
+                    row.era.as_deref(),
                     &session,
                     42,
                     difficulty,
@@ -550,7 +597,7 @@ mod tests {
         let difficulty = core::skill::Difficulty::Normal;
         let mode = Mode::Xl;
         let mut ia = game::shell_ia::instant_action(&assets, missions, difficulty);
-        ia.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        ia.add(MapPick::All, ModePick::One(mode.clone()), SidePick::AllEras);
         let rows = ia.launch();
         let options = ia.options;
         // (row index, seed, clock in seconds)
@@ -566,6 +613,7 @@ mod tests {
             }
         }
         const MAX_TICKS: u64 = 20 * 60 * core::TICK_HZ as u64;
+        let mode = &mode;
         let results = std::thread::scope(|s| {
             let handles: Vec<_> = plan
                 .iter()
@@ -586,6 +634,7 @@ mod tests {
                             &row.key,
                             mode.subst(),
                             &row.armies,
+                            row.era.as_deref(),
                             &session,
                             seed,
                             difficulty,
@@ -739,6 +788,7 @@ mod tests {
                 map,
                 mode,
                 &armies,
+                None,
                 &session,
                 42 + 17,
                 core::skill::Difficulty::Hard,
@@ -843,6 +893,26 @@ mod tests {
             }
             assert!(seen[0] > 0 && seen[1] > 0, "{case}: opening bots {seen:?}");
         }
+    }
+
+    #[test]
+    fn a_custom_era_mission_gives_its_own_world_layers() {
+        let dir = std::env::temp_dir().join(format!("openbf-era-layers-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("x_wav_era_1.ron");
+        std::fs::write(
+            &file,
+            r#"(map: "x", mode: "wav", source_game: "bf2", layers: ["x_conquest"], teams: [
+                (faction: "all", units: 1, tickets: 1),
+                (faction: "imp", units: 1, tickets: 1)],
+                ai_alive_cap: 1, spawn_delay: 10.0, spawn_interval: 0.25)"#,
+        )
+        .unwrap();
+        let armies = ["all".to_owned(), "imp".to_owned()];
+        let layers = mission_layers_for(&dir, "x", "wav", Some(&armies), Some("1"), None);
+        std::fs::remove_file(file).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+        assert_eq!(layers, ["x_conquest"]);
     }
 
     #[test]

@@ -100,6 +100,7 @@ pub fn upload_fx_sprite(r: &mut Renderer) -> Result<TextureHandle> {
         srgb: true,
         detail: None,
         bump: None,
+        env: None,
         scroll: [0.0, 0.0],
         uv_scale: [1.0, 1.0],
         label: Some("fx sprite"),
@@ -153,6 +154,7 @@ pub(super) fn upload_flat_water_texture(
         srgb: false,
         detail: None,
         bump: None,
+        env: None,
         scroll,
         uv_scale,
         label: Some(label),
@@ -173,6 +175,17 @@ pub(super) fn upload_cpu_texture_inner(
     let mips = t.mips();
     let detail_mips = t.detail.as_ref().map(|d| d.mips()).unwrap_or_default();
     let bump_mips = t.bump.as_ref().map(|b| b.mips()).unwrap_or_default();
+    // The KTX2 writer completes the strip's chain past the 1x1 faces, where
+    // a level no longer holds six.
+    let env_mips = t
+        .env
+        .as_ref()
+        .map(|e| {
+            let mut mips = e.mips();
+            mips.truncate((u32::BITS - e.width.leading_zeros()) as usize);
+            mips
+        })
+        .unwrap_or_default();
     r.add_texture(&TextureDesc {
         width: t.width,
         height: t.height,
@@ -191,6 +204,10 @@ pub(super) fn upload_cpu_texture_inner(
             width: b.width,
             height: b.height,
             mips: &bump_mips,
+        }),
+        env: t.env.as_ref().map(|e| render::EnvDesc {
+            size: e.width,
+            mips: &env_mips,
         }),
         scroll,
         uv_scale,

@@ -144,7 +144,7 @@ impl winit::application::ApplicationHandler for App {
             if self.netplay.is_some() {
                 self.screen = Screen::NetWait;
             } else {
-                self.init_shell();
+                self.begin_shell();
             }
             self.window = Some(window);
             self.renderer = Some(renderer);

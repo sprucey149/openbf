@@ -494,6 +494,7 @@ pub(super) fn prepare_round(
                             &j.name,
                             &mode,
                             Some(&j.row_armies),
+                            j.mission_era(),
                             script,
                         )
                     })
@@ -505,7 +506,12 @@ pub(super) fn prepare_round(
                         .net
                         .as_ref()
                         .map_or(j.name.as_str(), |(r, _)| r.map.as_str());
-                    scene.kill_objects(&game::mission::scene_kills(&j.missions_dir, map, &mode));
+                    scene.kill_objects(&game::mission::scene_kills(
+                        &j.missions_dir,
+                        map,
+                        &mode,
+                        j.mission_era(),
+                    ));
                 }
                 let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
                 let round = job.map(|j| j.build(&scene)).transpose()?;

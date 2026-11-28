@@ -20,8 +20,13 @@
 //!
 //! The GLB carries it as the material's `extras.spec_pass` (ours): `{"power":
 //! p, "rgb": [r, g, b]}` or `{"power": p, "rgb": null}` for "the sun colour".
-//! No BF2 word on the disc carries 0x100 beside 0x80 (0/469, §1), so the env
-//! pass that would displace this one is not modelled.
+//! No BF2 word on the disc carries 0x100 beside 0x80 (0/469, §1), so the PS2's
+//! env pass, which would displace this one, is not modelled.
+//!
+//! A PC-authored environment-mapped segment (`crate::envmap::companion`, a
+//! mod's) draws the PC's env pass in this pass's place
+//! (`analysis/re-pc-envmap.md`): the same JSON, the colour the material's
+//! specular bytes / 255, and the renderer samples the diffuse's baked cube.
 //!
 //! A PC-authored bump segment (`crate::bump::companion`) keeps the same JSON
 //! but draws the PC's pass instead (`analysis/re-pc-bump.md` §3): its colour
@@ -58,11 +63,13 @@ pub fn spec_pass(seg: &Segment) -> Option<SpecPass> {
     let f = seg.material_flags;
     let bytes = seg.spec_color.to_le_bytes();
     if seg.bf2_material {
-        if f & 0x80 == 0 || f & 0x04 != 0 {
+        let unit = |b: u8| f32::from(b) / 255.0;
+        // The env pass takes the specular one's place (`0x6f3ee3`).
+        let env = crate::envmap::companion(seg).is_some();
+        if !env && (f & 0x80 == 0 || f & 0x04 != 0) {
             return None;
         }
-        if crate::bump::companion(seg).is_some() {
-            let unit = |b: u8| f32::from(b) / 255.0;
+        if env || crate::bump::companion(seg).is_some() {
             return Some(SpecPass {
                 power: seg.spec_power,
                 rgb: Some([unit(bytes[0]), unit(bytes[1]), unit(bytes[2])]),

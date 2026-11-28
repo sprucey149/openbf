@@ -121,7 +121,7 @@ impl CampaignRuntime {
                     self.fire(
                         sim,
                         EventKind::CharacterDeath,
-                        &EventKey::default(),
+                        &key,
                         vec![char_value(victim.index), k.clone()],
                     );
                     self.fire(sim, EventKind::ObjectKill, &key, vec![Value::Ud(obj), k]);
@@ -134,7 +134,7 @@ impl CampaignRuntime {
                     self.fire(
                         sim,
                         EventKind::CharacterDeath,
-                        &EventKey::default(),
+                        &key,
                         vec![char_value(unit.index), Value::Nil],
                     );
                     self.fire(
@@ -198,10 +198,13 @@ impl CampaignRuntime {
                     if unit == self.w.player {
                         self.w.human_spawned = true;
                     }
+                    // The unit's own team and class answer the `Team` /
+                    // `Class` registrations.
+                    let key = self.w.obj_key(sim, Ud::Unit(unit.index, unit.gen));
                     self.fire(
                         sim,
                         EventKind::CharacterSpawn,
-                        &EventKey::default(),
+                        &key,
                         vec![char_value(unit.index)],
                     );
                 }
@@ -394,11 +397,16 @@ impl CampaignRuntime {
             let n = reinforcement_count(sim, t);
             if n != self.w.tickets_seen[t] {
                 self.w.tickets_seen[t] = n;
-                fired.push((
-                    EventKind::TicketCountChange,
-                    EventKey::default(),
-                    vec![Value::Num(t as f32 + 1.0), Value::Num(n as f32)],
-                ));
+                // Unlimited reinforcements (`SetReinforcementCount(t, -1)`)
+                // disables ticket-depletion callbacks; stock `Objective.lua`
+                // treats any `count <= 0` callback as `MissionDefeat`.
+                if n >= 0 {
+                    fired.push((
+                        EventKind::TicketCountChange,
+                        EventKey::default(),
+                        vec![Value::Num(t as f32 + 1.0), Value::Num(n as f32)],
+                    ));
+                }
             }
             if self.w.team_points[t] != self.w.points_seen[t] {
                 self.w.points_seen[t] = self.w.team_points[t];

@@ -191,6 +191,7 @@ fn row(key: &str, mode: ui::shell::Mode) -> ui::shell::Launch {
         },
         mode,
         armies: ["all".into(), "imp".into()],
+        era: Some("gcw".into()),
         label: key.into(),
     }
 }

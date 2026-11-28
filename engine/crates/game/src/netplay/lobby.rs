@@ -22,7 +22,7 @@ use super::ContentManifest;
 use serde::{Deserialize, Serialize};
 use ui::shell::{
     Entry, Era, Group, InstantAction, ListCursor, MapEntry, MapPick, Mode, ModePick, Page, Side,
-    State, ERAS, GROUPS, MODES,
+    State, ERAS, GROUPS,
 };
 
 /// How long the host waits for every player's `Ready` after a round.
@@ -240,32 +240,35 @@ pub struct LobbyEntry {
 }
 
 /// [`Side`] as data.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SideKey {
     Era(u8),
+    CustomEra(String),
     Mixed(u8),
 }
 
 impl SideKey {
-    fn of(s: Side) -> Self {
+    fn of(s: &Side) -> Self {
         match s {
-            Side::Era(e) => SideKey::Era(ERAS.iter().position(|x| *x == e).unwrap_or(0) as u8),
-            Side::Mixed(i) => SideKey::Mixed(i as u8),
+            Side::Era(Era::Custom(code)) => SideKey::CustomEra(code.clone()),
+            Side::Era(e) => SideKey::Era(ERAS.iter().position(|x| x == e).unwrap_or(0) as u8),
+            Side::Mixed(i) => SideKey::Mixed(*i as u8),
         }
     }
 
-    fn side(self) -> Option<Side> {
+    fn side(&self) -> Option<Side> {
         match self {
-            SideKey::Era(i) => ERAS.get(usize::from(i)).map(|e: &Era| Side::Era(*e)),
+            SideKey::Era(i) => ERAS.get(usize::from(*i)).map(|e| Side::Era(e.clone())),
+            SideKey::CustomEra(code) => Era::from_code(code).map(Side::Era),
             SideKey::Mixed(i) => {
-                (usize::from(i) < ui::shell::MIXED.len()).then_some(Side::Mixed(usize::from(i)))
+                (usize::from(*i) < ui::shell::MIXED.len()).then_some(Side::Mixed(usize::from(*i)))
             }
         }
     }
 }
 
 fn mode_of(subst: &str) -> Option<Mode> {
-    MODES.into_iter().find(|m| m.subst() == subst)
+    Mode::from_subst(subst)
 }
 
 /// The host's page as data.
@@ -391,9 +394,9 @@ impl LobbyState {
             ],
             picked_map: match ia.picked_map {
                 MapPick::One(i) => Some(key(i)),
-                MapPick::All => None,
+                MapPick::Folder(_) | MapPick::All => None,
             },
-            picked_mode: match ia.picked_mode {
+            picked_mode: match &ia.picked_mode {
                 ModePick::One(m) => Some(m.subst().to_owned()),
                 ModePick::All => None,
             },
@@ -484,7 +487,7 @@ pub fn playlist_keys(ia: &InstantAction) -> Vec<LobbyEntry> {
         .map(|e| LobbyEntry {
             map: ia.maps[e.map].key.clone(),
             mode: e.mode.subst().to_owned(),
-            side: SideKey::of(e.side),
+            side: SideKey::of(&e.side),
         })
         .collect()
 }
@@ -538,7 +541,7 @@ pub fn restrict(
     {
         let picked = match ia.picked_map {
             MapPick::One(i) => ia.maps.get(i).map(|m| m.key.clone()),
-            MapPick::All => None,
+            MapPick::Folder(_) | MapPick::All => None,
         };
         ia.maps = maps;
         let (kept, lost) = entries_from_keys(&ia.maps, &rows);

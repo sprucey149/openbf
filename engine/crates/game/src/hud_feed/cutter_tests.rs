@@ -130,3 +130,35 @@ fn owned_cutters_draw_the_indexed_bf2_geometry() {
         );
     }
 }
+
+#[test]
+fn a_mod_model_posed_like_a_stock_one_takes_that_rows_place() {
+    let layout = |text: &str| -> HudLayout { ron::from_str(text).unwrap() };
+    let mut hud = fixture();
+    let first = hud.elems.len();
+    hud.append_addon(&layout(
+        r#"(name:"mod", nodes:[
+            (name:"Model3D", args:["extradisplay"], children:[
+                (name:"MeshInfo", args:["com_weap_inf_fusioncutter"], children:[
+                    (name:"Position", args:[30,31,32]),
+                    (name:"Rotation", args:[4,5,6]),
+                    (name:"Scale", args:[7,8,9]),
+                ]),
+                (name:"MeshInfo", args:["com_weap_inf_other"], children:[
+                    (name:"Position", args:[30,31,32]),
+                    (name:"Rotation", args:[40,50,60]),
+                ]),
+            ]),
+        ])"#,
+    ));
+    let stock = hud.elems[0].mesh_info.len();
+    place_mod_models(&mut hud, first);
+    let placed: &MeshInfo = hud.elems[0].mesh_info.last().unwrap();
+    assert_eq!(hud.elems[0].mesh_info.len(), stock + 1);
+    assert_eq!(placed.mesh, "com_weap_inf_fusioncutter");
+    assert_eq!(placed.pos, Vec3::new(1.0, 2.0, 3.0));
+    assert_eq!(placed.rot, Vec3::new(4.0, 5.0, 6.0));
+    assert_eq!(placed.scale, Vec3::new(7.0, 8.0, 9.0));
+    place_mod_models(&mut hud, first);
+    assert_eq!(hud.elems[0].mesh_info.len(), stock + 1);
+}

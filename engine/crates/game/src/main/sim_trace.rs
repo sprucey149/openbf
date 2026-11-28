@@ -333,7 +333,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     let (mut sim, name) = if let Some(map) = map {
         // Normal battles may use a generic design fallback. A non-Conquest
         // parity trace must prove the requested mode actually exists first.
-        if mode != "con" {
+        let mission_layers: &[String] = mission.as_ref().map_or(&[][..], |m| &m.layers);
+        if mode != "con" && mission_layers.is_empty() {
             let manifest: game::assets::Manifest =
                 ron::from_str(&pak::read_to_string(map.join("manifest.ron"))?)?;
             if !(mode == "hunt" && manifest.source_game == "bf1")
@@ -342,7 +343,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 bail!("map has no authored world layer for mode {mode}");
             }
         }
-        let (mut scene, load) = game::assets::load_battle_scene(&map, &mode)?;
+        let (mut scene, load) =
+            game::assets::load_battle_scene_with_layers(&map, &mode, mission_layers)?;
         let killed = mission
             .as_ref()
             .map_or(0, |m| scene.kill_objects(m.scene_kills()));

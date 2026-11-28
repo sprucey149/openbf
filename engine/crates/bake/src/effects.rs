@@ -273,12 +273,43 @@ pub fn bake_side_with(
     shields: bool,
 ) -> Result<Option<FxSet>> {
     let buf = std::fs::read(lvl_path).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
-    let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
-    let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
+    bake_lvls(&[&buf], lvl_path, outdir, game, shields, &[])
+}
+
+/// [`bake_side`] over several LVLs read in order (an addon map's own sides):
+/// a name is the first LVL's that has it, as the game stacks what it reads.
+/// `sheets` are textures the layer also holds when one of the LVLs carries
+/// them (the sheets the sides' ordnance classes draw their bolts with).
+pub fn bake_layers(
+    lvls: &[&[u8]],
+    label: &str,
+    outdir: &str,
+    game: &str,
+    sheets: &[String],
+) -> Result<Option<FxSet>> {
+    bake_lvls(lvls, label, outdir, game, false, sheets)
+}
+
+fn bake_lvls(
+    lvls: &[&[u8]],
+    label: &str,
+    outdir: &str,
+    game: &str,
+    shields: bool,
+    sheets: &[String],
+) -> Result<Option<FxSet>> {
+    let mut inners = Vec::with_capacity(lvls.len());
+    let mut chunks = Vec::new();
+    for buf in lvls {
+        let inner = mungefs::open(buf).map_err(|e| anyhow!("{e}"))?;
+        chunks.extend(mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?);
+        inners.push(inner);
+    }
     let mut fx = Collected::from_chunks(chunks.iter())?;
     fx.write_shields = shields;
-    if fx.effects.is_empty() && fx.beams.is_empty() && fx.lightning.is_empty() {
-        eprintln!("effects: {lvl_path} holds no particle effect");
+    let empty = fx.effects.is_empty() && fx.beams.is_empty() && fx.lightning.is_empty();
+    if empty && sheets.is_empty() {
+        eprintln!("effects: {label} holds no particle effect");
         // As `Collected::write`: no stale file from an earlier bake.
         let _ = std::fs::remove_file(Path::new(outdir).join(EFFECTS_FILE));
         return Ok(None);
@@ -332,11 +363,27 @@ pub fn bake_side_with(
             wanted.push(t.clone());
         }
     }
-    let flags: HashMap<String, u32> = wanted
-        .iter()
-        .map(|t| (t.clone(), crate::detail::ALPHA_IS_MEANINGFUL))
-        .collect();
-    let have_textures = crate::soldier::bake_textures_flagged(inner, &wanted, &flags, out, None)?;
+    for t in sheets {
+        let t = t.to_ascii_lowercase();
+        if !wanted.contains(&t) {
+            wanted.push(t);
+        }
+    }
+    let mut have_textures: Vec<String> = Vec::new();
+    for inner in inners {
+        let rest: Vec<String> = wanted
+            .iter()
+            .filter(|t| !have_textures.iter().any(|h| h.eq_ignore_ascii_case(t)))
+            .cloned()
+            .collect();
+        let flags: HashMap<String, u32> = rest
+            .iter()
+            .map(|t| (t.clone(), crate::detail::ALPHA_IS_MEANINGFUL))
+            .collect();
+        have_textures.extend(crate::soldier::bake_textures_flagged(
+            inner, &rest, &flags, out, None,
+        )?);
+    }
     fx.write(out, game, &have_textures, &have_models)
 }
 

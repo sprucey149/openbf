@@ -234,7 +234,8 @@ fn run_ffmpeg(segment: &[u8], args: &[&str]) -> Result<(std::process::ExitStatus
         }
     }
     let _remove = Remove(file.as_deref());
-    let mut cmd = Command::new("ffmpeg");
+    let ffmpeg = crate::ogg::ffmpeg_bin();
+    let mut cmd = Command::new(&ffmpeg);
     cmd.args(["-v", "error", "-f", fmt, "-i"]);
     if let Some(path) = &file {
         std::fs::write(path, segment).with_context(|| path.display().to_string())?;
@@ -246,7 +247,12 @@ fn run_ffmpeg(segment: &[u8], args: &[&str]) -> Result<(std::process::ExitStatus
         .args(args)
         .stdout(Stdio::piped())
         .spawn()
-        .context("ffmpeg (the shell movie's transcode needs it on PATH)")?;
+        .with_context(|| {
+            format!(
+                "{} (the shell movie's transcode needs ffmpeg bundled or on PATH)",
+                ffmpeg.display()
+            )
+        })?;
     let feeder = child.stdin.take().map(|mut stdin| {
         let data = segment.to_vec();
         std::thread::spawn(move || stdin.write_all(&data))

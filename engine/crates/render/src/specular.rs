@@ -26,6 +26,10 @@
 //! instead (`analysis/re-pc-bump.md` §3, `fs_spec`'s `pc_bump_spec`): it
 //! samples the PC core's `specularcubemap`, whose +Y face
 //! [`Renderer::set_pc_spec_cube`] installs; without one it adds nothing.
+//!
+//! A texture with a PC environment cube ([`crate::EnvDesc`]) draws the PC's
+//! environment pass (`analysis/re-pc-envmap.md`, `pc_env_spec`): its own cube
+//! along the world reflection, times the material's colour.
 
 use crate::bindings;
 use crate::texture::upload_levels;

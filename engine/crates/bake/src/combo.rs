@@ -1,7 +1,7 @@
 //! BF2 side `comb` chunks: checked names and lossless config scopes.
 //! `NAME` is an FNV hash; DATA/SCOP is the shared compiled-config format.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use manifest::combo::{ComboDef, ComboField, ComboKeyword as K, ComboSet, ComboValue};
 use mungefs::{config::ConfigNode, Chunk};
 use std::path::Path;
@@ -85,16 +85,36 @@ keywords![
     TimeInPosture,
 ];
 
-fn field(node: ConfigNode) -> Result<ComboField> {
-    let keyword = KEYWORDS
+fn keyword(hash: u32) -> Option<K> {
+    KEYWORDS
         .iter()
-        .find(|(name, _)| mungefs::fnv1a_lowercase(name) == node.hash)
+        .find(|(name, _)| mungefs::fnv1a_lowercase(name) == hash)
         .map(|(_, key)| *key)
         // The community DLC spells two block-animation blend fields
-        // "BendTimeTo". Normalize that specific spelling; all other unknown
-        // hashes still fail rather than silently discarding combo fields.
-        .or_else(|| (node.hash == mungefs::fnv1a_lowercase("BendTimeTo")).then_some(K::BlendTimeTo))
-        .ok_or_else(|| anyhow!("unknown combo keyword 0x{:08x}", node.hash))?;
+        // "BendTimeTo". Normalize that specific spelling.
+        .or_else(|| (hash == mungefs::fnv1a_lowercase("BendTimeTo")).then_some(K::BlendTimeTo))
+}
+
+/// What a keyword no parser here knows means.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Unknown {
+    /// It fails the combo, so that a gap in this parser cannot silently
+    /// discard a field of the game's own data.
+    Refuse,
+    /// It is skipped with its scope, as the game's parser does: PS2 BF2
+    /// FUN_00309178 reads on past a hash it does not compare against (and
+    /// past the scope after it). For a mod's LVL, whose typos the game
+    /// played through.
+    Skip,
+}
+
+/// `Ok(None)`: a skipped keyword.
+fn field(node: ConfigNode, unknown: Unknown) -> Result<Option<ComboField>> {
+    let keyword = match keyword(node.hash) {
+        Some(keyword) => keyword,
+        None if unknown == Unknown::Skip => return Ok(None),
+        None => bail!("unknown combo keyword 0x{:08x}", node.hash),
+    };
     let args = (0..node.values.len())
         .map(|i| match node.str_arg(i) {
             Some(s) => ComboValue::Text(s.into()),
@@ -104,7 +124,7 @@ fn field(node: ConfigNode) -> Result<ComboField> {
     let children = node
         .children
         .into_iter()
-        .map(field)
+        .filter_map(|child| field(child, unknown).transpose())
         .collect::<Result<_>>()?;
     let field = ComboField {
         keyword,
@@ -113,7 +133,7 @@ fn field(node: ConfigNode) -> Result<ComboField> {
         children,
     };
     validate::arguments(&field)?;
-    Ok(field)
+    Ok(Some(field))
 }
 
 // The shared decoder tolerates short records for old config readers. Combos
@@ -175,6 +195,10 @@ fn check_records(container: &Chunk<'_>, depth: usize) -> Result<()> {
 
 /// One checked definition; its hash is deliberately kept side-local.
 pub fn parse_combo(chunk: &Chunk<'_>) -> Result<ComboDef> {
+    parse_one(chunk, Unknown::Refuse)
+}
+
+fn parse_one(chunk: &Chunk<'_>, unknown: Unknown) -> Result<ComboDef> {
     if &chunk.tag != b"comb" {
         bail!("expected comb, got {:?}", chunk.tag);
     }
@@ -191,7 +215,7 @@ pub fn parse_combo(chunk: &Chunk<'_>) -> Result<ComboDef> {
     let name_hash = u32::from_le_bytes(names[0].payload.try_into().unwrap());
     let mut fields: Vec<ComboField> = mungefs::config::parse_tree(chunk)?
         .into_iter()
-        .map(field)
+        .filter_map(|node| field(node, unknown).transpose())
         .collect::<Result<_>>()
         .with_context(|| format!("combo 0x{name_hash:08x}"))?;
     scope::mark(chunk, &mut fields)?;
@@ -211,6 +235,10 @@ pub fn parse_combo(chunk: &Chunk<'_>) -> Result<ComboDef> {
 
 /// All side definitions, first-seen order. Identical sublevel copies fold.
 pub fn combos_from_lvl(buf: &[u8]) -> Result<ComboSet> {
+    read_combos(buf, Unknown::Refuse)
+}
+
+fn read_combos(buf: &[u8], unknown: Unknown) -> Result<ComboSet> {
     let mut set = ComboSet {
         scope_provenance: true,
         ..ComboSet::default()
@@ -219,7 +247,7 @@ pub fn combos_from_lvl(buf: &[u8]) -> Result<ComboSet> {
         if &chunk.tag != b"comb" {
             continue;
         }
-        let combo = parse_combo(&chunk)?;
+        let combo = parse_one(&chunk, unknown)?;
         if let Some(old) = set.combos.iter().find(|c| c.name_hash == combo.name_hash) {
             if *old != combo {
                 bail!(
@@ -239,7 +267,16 @@ pub fn combos_from_lvl(buf: &[u8]) -> Result<ComboSet> {
 /// Gameplay output, with only documented shipped-data corrections. The raw
 /// readers above retain the disc's authored records for evidence and audits.
 pub fn baked_combos_from_lvl(buf: &[u8]) -> Result<ComboSet> {
-    let mut set = combos_from_lvl(buf)?;
+    corrected(combos_from_lvl(buf)?)
+}
+
+/// [`baked_combos_from_lvl`] for a mod's LVL: a keyword the game would skip
+/// is skipped.
+pub fn baked_mod_combos_from_lvl(buf: &[u8]) -> Result<ComboSet> {
+    corrected(read_combos(buf, Unknown::Skip)?)
+}
+
+fn corrected(mut set: ComboSet) -> Result<ComboSet> {
     for combo in &mut set.combos {
         compatibility::vader_terminal_target(combo);
         compatibility::vader_deflect_frame_flags(combo);
@@ -452,11 +489,11 @@ mod tests {
             string: Some("stand_block_front1".into()),
             children: vec![],
         };
-        let parsed = field(node.clone()).unwrap();
+        let parsed = field(node.clone(), Unknown::Refuse).unwrap().unwrap();
         assert_eq!(parsed.keyword, K::BlendTimeTo);
         assert_eq!(parsed.number(1), Some(0.0));
         node.hash = mungefs::fnv1a_lowercase("OtherTimeTo");
-        assert!(field(node).is_err());
+        assert!(field(node, Unknown::Refuse).is_err());
     }
 
     fn chunk(tag: &[u8; 4], p: &[u8]) -> Vec<u8> {
@@ -496,6 +533,23 @@ mod tests {
             format!("{err:#}").contains("unknown combo keyword"),
             "{err:#}"
         );
+    }
+
+    #[test]
+    fn a_mod_skips_an_unknown_keyword_and_its_scope() {
+        let mut state = data("AnimationTypo", "a");
+        state.extend(chunk(b"SCOP", &data("AlsoUnknown", "b")));
+        state.extend(data("Animation", "stand_idle"));
+        let mut p = chunk(b"NAME", &7u32.to_le_bytes());
+        p.extend(data("State", "IDLE"));
+        p.extend(chunk(b"SCOP", &state));
+        let bytes = chunk(b"ucfb", &chunk(b"comb", &p));
+        assert!(combos_from_lvl(&bytes).is_err());
+        let set = baked_mod_combos_from_lvl(&bytes).unwrap();
+        let state = set.combos[0].state("IDLE").unwrap();
+        assert_eq!(state.children.len(), 1);
+        assert!(!state.children[0].scoped);
+        assert_eq!(state.children[0].text(0), Some("stand_idle"));
     }
 
     #[test]

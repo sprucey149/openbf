@@ -80,6 +80,8 @@ struct MissionDefRon {
     heroes: Vec<(u8, String)>,
     class_load_order: Vec<SideClassLoadRon>,
     teams: Vec<TeamDefRon>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom_team_names: Option<[String; 2]>,
     ai_alive_cap: u32,
     spawn_delay: f32,
     spawn_interval: f32,
@@ -110,6 +112,14 @@ struct MissionDefRon {
     layers: Vec<String>,
     #[serde(skip_serializing_if = "WorldEvents::is_empty")]
     world_events: WorldEvents,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    class_properties: Vec<(String, String, String)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    script_setup: Option<(Option<i64>, bool)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    script: Option<manifest::script_ir::ScriptDef>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    script_libs: Vec<(String, String)>,
     source: String,
 }
 
@@ -136,7 +146,12 @@ fn world_action(action: &WorldAction) -> Action {
 }
 
 /// Convert a statically analyzed legacy BF2 mission into OpenBF mission RON.
-pub fn mission_to_ron(map_key: &str, m: &InspectedMission) -> Result<String> {
+pub fn mission_to_ron(
+    map_key: &str,
+    m: &InspectedMission,
+    script: Option<manifest::script_ir::ScriptDef>,
+    script_libs: Vec<(String, String)>,
+) -> Result<String> {
     if !m.supported {
         bail!(
             "mission '{}' ({}) is unsupported: {}",
@@ -212,6 +227,7 @@ pub fn mission_to_ron(map_key: &str, m: &InspectedMission) -> Result<String> {
             })
             .collect(),
         teams,
+        custom_team_names: m.custom_team_names.clone(),
         ai_alive_cap: m.ai_alive_cap.max(1),
         spawn_delay,
         spawn_interval,
@@ -270,6 +286,11 @@ pub fn mission_to_ron(map_key: &str, m: &InspectedMission) -> Result<String> {
                 .map(|(name, actions)| (name.clone(), actions.iter().map(world_action).collect()))
                 .collect(),
         },
+        class_properties: m.class_properties.clone(),
+        script_setup: (m.script_pick.is_some() || m.script_multiplayer)
+            .then_some((m.script_pick, m.script_multiplayer)),
+        script,
+        script_libs,
         source: format!("addon:{}", m.script_name),
     };
 

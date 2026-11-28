@@ -831,11 +831,19 @@ impl Sim {
     /// §1 / §3), else the team's first spawn post - the PS2's default pick
     /// `FUN_0036cca0` is not read (PROVISIONAL).
     pub(in crate::sim) fn open_spawn_map(&mut self, s: usize, team: u8) {
-        self.spawn_stage[s] = SpawnStage::Map;
+        let posts = self.player_spawn_posts(team);
         let post = self.spawn_post_choice[s]
             .and_then(|c| self.keep_or_nearest_post(team, c))
-            .or_else(|| self.player_spawn_posts(team).first().map(|q| q.0));
+            .or_else(|| posts.first().map(|q| q.0));
         self.spawn_post_choice[s] = post;
+        if posts.len() == 1 && self.battle.scripted() {
+            self.spawn_stage[s] = SpawnStage::Class;
+            if let Some(hero) = self.owned_hero_class(s, team) {
+                self.spawn_choice[s] = hero;
+            }
+        } else {
+            self.spawn_stage[s] = SpawnStage::Map;
+        }
     }
 
     /// How likely each class of `team` is to be the next AI spawn (the maintainer,
@@ -909,6 +917,43 @@ impl Sim {
     /// cursor advance) when the battle refuses the spawn.
     pub fn spawn_ai(&mut self, team: u8, pos: Vec3, yaw: f32) -> Option<UnitHandle> {
         self.spawn_ai_with_slot_policy(team, pos, yaw, false)
+    }
+
+    /// Spawn one AI member for main team `team < 2` from a mission script
+    /// (`SpawnCharacter` / `Ambush`, B2 `FUN_001916e8`). Bypasses the
+    /// reinforcement-count gate (scripts may set a team's reinforcement count
+    /// to 0 as a custom counter) while still respecting `ai_spawn_allowed`,
+    /// enabled classes, and the team's `ai_limit`.
+    pub fn spawn_scripted_ai(&mut self, team: u8, pos: Vec3, yaw: f32) -> Option<UnitHandle> {
+        let t = usize::from(team);
+        if t >= 2 || self.classes.get(t).is_none_or(Vec::is_empty) {
+            return None;
+        }
+        if !self.ai_spawn_allowed[t]
+            || !(0..self.classes[t].len()).any(|c| self.is_class_enabled(team, c))
+        {
+            return None;
+        }
+        if self.battle.teams[t].alive_ai >= self.ai_limit(team) {
+            return None;
+        }
+        let c = if self.hero_assault() {
+            self.assault_class(team, None)?
+        } else {
+            self.ai_class(team)
+        };
+        let spec = self.classes[t][usize::from(c)].spec(
+            team,
+            pos,
+            yaw,
+            Controller::Ai,
+            c,
+            self.bot_skill(team),
+        );
+        let h = self.spawn_with_slot_policy(&spec, false, true)?;
+        self.battle.teams[t].alive_ai += 1;
+        self.ai_spawned[t] += 1;
+        Some(h)
     }
 
     /// Grow a team's roster while preserving every pending respawn and its wave.
@@ -1452,7 +1497,11 @@ impl Sim {
                     self.units[i].soldier.set_prev_buttons(held);
                 }
             }
-            SpawnStage::Class if back => self.spawn_stage[s] = SpawnStage::Map,
+            SpawnStage::Class if back => {
+                if !self.battle.scripted() || self.player_spawn_posts(team).len() > 1 {
+                    self.spawn_stage[s] = SpawnStage::Map;
+                }
+            }
             // The carousel steps in `class_carousel_step`, every tick.
             SpawnStage::Class => {}
             // Issue #28, the PS2's state 4: X accepts as on the class screen

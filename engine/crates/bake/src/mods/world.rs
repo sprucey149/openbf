@@ -6,7 +6,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{ensure, Context, Result};
-use mungefs::addon::AddonWorldLoad;
+use mungefs::addon::{AddonWorldLoad, MAX_LVL_BYTES};
 use mungefs::Chunk;
 use sha2::{Digest, Sha256};
 
@@ -15,8 +15,8 @@ pub(super) struct WorldInput {
     pub selectors: BTreeMap<u32, String>,
 }
 
-const MAX_ARCHIVE_BYTES: u64 = 128 * 1024 * 1024;
-const MAX_WORLD_BYTES: usize = 256 * 1024 * 1024;
+/// The joined world is one `ucfb` chunk, whose length is a 32-bit field.
+const MAX_WORLD_BYTES: usize = u32::MAX as usize;
 
 fn begin_chunk(out: &mut Vec<u8>, tag: &[u8; 4]) -> usize {
     let start = out.len();
@@ -49,10 +49,10 @@ pub(super) fn read_world(loads: &[AddonWorldLoad], primary: &Path) -> Result<Wor
     for load in loads {
         let mut raw = Vec::new();
         File::open(&load.path)?
-            .take(MAX_ARCHIVE_BYTES + 1)
+            .take(MAX_LVL_BYTES + 1)
             .read_to_end(&mut raw)?;
         ensure!(
-            raw.len() as u64 <= MAX_ARCHIVE_BYTES,
+            raw.len() as u64 <= MAX_LVL_BYTES,
             "archive {} exceeds the conversion size limit",
             load.rel_path
         );
@@ -75,10 +75,9 @@ pub(super) fn read_world(loads: &[AddonWorldLoad], primary: &Path) -> Result<Wor
         }
         for selector in &load.selectors {
             let hash = mungefs::fnv1a_lowercase(selector);
-            let sublevels = wrapped
-                .get(&hash)
-                .with_context(|| format!("{} has no sublevel {selector}", load.rel_path))?;
-            for sub in sublevels {
+            // The game loads the sublevels the archive has under a requested
+            // name; a name with none loads nothing (PS2 `FUN_00177058`).
+            for sub in wrapped.get(&hash).into_iter().flatten() {
                 if is_primary {
                     let wrapper = begin_chunk(&mut bytes, b"lvl_");
                     append(&mut bytes, sub)?;

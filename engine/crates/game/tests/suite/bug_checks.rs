@@ -186,6 +186,7 @@ fn hud_model(dead: bool) -> ui::hud::HudModel {
         countdown: None,
         round_end: None,
         time_left: None,
+        objective_timer: None,
         messages: vec![],
         stats: None,
         player_team: 0,

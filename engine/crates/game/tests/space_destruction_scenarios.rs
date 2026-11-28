@@ -87,6 +87,7 @@ fn make_test_texture() -> CpuTexture {
         extra_mips: Vec::new(),
         detail: None,
         bump: None,
+        env: None,
     }
 }
 

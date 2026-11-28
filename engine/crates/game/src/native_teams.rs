@@ -72,14 +72,24 @@ pub fn install(
         }
         let campaign = mission.mode.eq_ignore_ascii_case("campaign");
         let main_side = assets_dir.join(format!("side_{}", mission.source_game));
+        // A converted mod's script mode: its third team may field any class
+        // of the map, from the side files or the shared one.
+        let scripted = !campaign && mission.script.is_some();
         let found = native_side(classes_dir, &mission.source_game, first).or_else(|| {
-            campaign.then(|| {
+            (campaign || scripted).then(|| {
                 side_with_class(
                     classes_dir,
                     &mission.source_game,
                     first,
                     &AUXILIARY_FACTION_SIDES,
                 )
+                .or_else(|| {
+                    scripted
+                        .then(|| {
+                            side_with_class(classes_dir, &mission.source_game, first, &["ingame"])
+                        })
+                        .flatten()
+                })
             })?
         });
         let Some((faction, source)) = found else {
@@ -90,7 +100,10 @@ pub fn install(
             continue;
         };
         let roster = (|| -> anyhow::Result<_> {
-            let side_filter: &[&str] = if AUXILIARY_FACTION_SIDES.contains(&faction) {
+            // A scripted hero's base classes may sit in any army's file.
+            let side_filter: &[&str] = if scripted {
+                &AUXILIARY_FACTION_SIDES
+            } else if AUXILIARY_FACTION_SIDES.contains(&faction) {
                 &[faction]
             } else {
                 &[]
@@ -125,7 +138,7 @@ pub fn install(
                     }
                     class.geometry.as_ref().is_some_and(|name| {
                         pak::is_file(side.join("soldiers").join(format!("{name}.glb")))
-                            || (campaign
+                            || ((campaign || scripted)
                                 && pak::is_file(
                                     main_side.join("soldiers").join(format!("{name}.glb")),
                                 ))

@@ -1,6 +1,8 @@
 //! Generic legacy Battlefront II addon discovery, mission translation, and
 //! versioned cache conversion.
 
+mod addon_sides;
+mod assets;
 pub mod convert;
 pub mod mission;
 pub mod replace;
@@ -21,6 +23,8 @@ pub use convert::{convert_mod_to_cache, ConvertOptions, ConvertReport};
 /// the player's target choices and scan caches in `openbf_data`.
 pub struct ModEnv {
     pub stock: Option<StockAssets>,
+    /// [`StockAssets::identity`] of `stock`.
+    pub stock_identity: Option<String>,
     pub catalogs: StockCatalogs,
     pub sources: StockSources,
     pub data_dir: Option<PathBuf>,
@@ -33,6 +37,7 @@ impl Default for ModEnv {
     fn default() -> Self {
         Self {
             stock: None,
+            stock_identity: None,
             catalogs: StockCatalogs::default(),
             sources: StockSources::default(),
             data_dir: None,
@@ -58,6 +63,7 @@ impl ModEnv {
             let stock = StockAssets::open(path)?;
             env.catalogs = stock.catalogs();
             env.stock = Some(stock);
+            env.stock_identity = StockAssets::identity(path);
         }
         if let Some(dir) = data_dir {
             env.sources = StockSources::from_list(&StockSourceList::load(dir));

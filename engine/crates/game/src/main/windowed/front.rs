@@ -112,13 +112,26 @@ pub(super) struct FrontShell {
 }
 
 impl FrontShell {
-    pub(super) fn new(assets_dir: &std::path::Path) -> Self {
+    /// The front screens' menus, with the texts of whatever is mounted now.
+    fn menus(assets_dir: &std::path::Path) -> ui::shell_ps2::ShellMenus {
         let texts = game::event_feed::Texts::load(assets_dir, "bf2");
-        let text = |key: &str, english: &str| {
+        ui::shell_ps2::ShellMenus::new(&|key: &str, english: &str| {
             texts
                 .bf2_text(key)
                 .map_or_else(|| english.to_owned(), |t| t.trim_end().to_owned())
-        };
+        })
+    }
+
+    /// `[ours]` The mods finished mounting behind the title screen: their
+    /// texts and icons go into the menus, which are still on the title. The
+    /// movie and the music carry on (a mod replaces neither).
+    pub(super) fn reload_menus(&mut self, assets_dir: &std::path::Path) {
+        self.menus = Self::menus(assets_dir);
+        // Rebuilt at this frame's start, with the mods' icon folders.
+        self.view = None;
+    }
+
+    pub(super) fn new(assets_dir: &std::path::Path) -> Self {
         let movie = game::shell_movie::ShellMovie::load(assets_dir);
         if movie.is_none() {
             eprintln!("shell: no movie baked (bake common); the menus draw over black");
@@ -133,7 +146,7 @@ impl FrontShell {
         let gal_music = game::sounds::SoundLib::load(&assets_dir.join("bf2_gal1"))
             .and_then(|sl| sl.stream_takes("metagame_menu_music"));
         FrontShell {
-            menus: ui::shell_ps2::ShellMenus::new(&text),
+            menus: Self::menus(assets_dir),
             picker: None,
             save_name: None,
             name_input: Default::default(),
@@ -844,6 +857,17 @@ impl App {
             };
             start = false;
         }
+        // The mods still mounting (`boot`): the title waits, and only Back
+        // (quit) acts.
+        let loading = self.step_mod_boot(&mut front);
+        if let Some(line) = &loading {
+            front.menus.prompt.clone_from(line);
+            input = ui::menu::MenuInput {
+                back: input.back,
+                ..Default::default()
+            };
+            start = false;
+        }
         if front.view.is_none() {
             if let Some(r) = &self.renderer {
                 front.view = game::hud_feed::HudView::for_renderer(&self.assets_dir, r)
@@ -856,7 +880,8 @@ impl App {
         // Hover acts only on fresh pointer motion or a click (`Pointer`).
         let wheel = self.shell_pointer.take_wheel();
         let pointer = self.shell_pointer.take_frame();
-        let click = pointer.is_some_and(|(_, c)| c) && front.name_edit.is_none();
+        let click =
+            pointer.is_some_and(|(_, c)| c) && front.name_edit.is_none() && loading.is_none();
         if let (Some((point, _)), Some((w, h)), Some(view)) = (
             pointer,
             self.renderer.as_ref().map(|r| r.size()),

@@ -65,6 +65,22 @@ B1 `FUN_00204748`: K+0x100 = M·T0 for every unit (T0 at `DAT_005862f0` by postu
 - K+0x56 counts logical action 5 (BF1); no control maps to it in any default table (`re-zoom.md` §1). BF2's is
   action 6, likewise unmapped in table 0. A fresh BF2 profile reads "Viewpoint: 3rd Person".
 
+### 3.1 BF2: a melee weapon forces third person (2026-11-27) [V]
+
+- The BF2 resolver `FUN_001ce348` asks the class `ForceMode` first, then the controllable's force-third virtual
+  (+0x44, nonzero -> third), then its force-first virtual (+0x48), then the player's preference. `FUN_001ce558`
+  writes the answer into the view record whenever it differs.
+- The soldier's controllable vtable is 0x61e948 (first word -0x288). Its +0x44 is `FUN_002557a0`: for i = 0, 1,
+  the signed byte E+0x7e0+i, when not negative, indexes the weapon array E+0x7c0; **either weapon's virtual +0x5c
+  true -> third person**. The two bytes are the two channels' selected weapons, so a melee weapon counts whether
+  or not it is the one in hand. +0x48 returns 0 (the base's).
+- Weapon +0x5c is true only in vtable 0x629838, `WeaponMelee` (`re-zoom.md` §4, which finds the same virtual
+  cancelling the zoom). So lightsabers and every other `melee` class are never seen in first person.
+- BF1: not traced. The base game gives the player no melee weapon.
+- Port: `WeaponClass::melee_class`, applied where the sim writes `Unit::first_person` each tick; the player's
+  preference is kept, so switching away from the weapon restores first person. [ours] tracked VR is exempt: it
+  has no third person.
+
 ## 4. Suspended [V]
 
 - BF1: O+0xc4c set by `FUN_00209758` on the change to state 5 (thrown) while in first person; cleared in state 0

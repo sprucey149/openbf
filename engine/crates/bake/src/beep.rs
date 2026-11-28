@@ -99,7 +99,7 @@ pub fn bake_beep_with_path(
         std::fs::write(&wav_path, wav).with_context(|| stem.clone())?;
         // OGG via ffmpeg when available (kira plays both wav and ogg).
         let ogg_path = Path::new(outdir).join(format!("{stem}.ogg"));
-        if encode_ogg("ffmpeg", &wav_path, &ogg_path)? {
+        if encode_ogg(&crate::ogg::ffmpeg_bin(), &wav_path, &ogg_path)? {
             let mut buf =
                 std::fs::read(&ogg_path).with_context(|| ogg_path.display().to_string())?;
             crate::ogg::pin_ogg_serial(&mut buf, ogg_serial(stem))
@@ -122,7 +122,9 @@ pub fn bake_beep_with_path(
 /// `-nostdin` and a null stdin keep ffmpeg off the terminal, so a bake run in
 /// the background is never stopped waiting for it (SIGTTIN). Neither changes
 /// the bytes it writes.
-fn encode_ogg(ffmpeg: &str, wav: &Path, ogg: &Path) -> Result<bool> {
+fn encode_ogg(ffmpeg: impl AsRef<std::ffi::OsStr>, wav: &Path, ogg: &Path) -> Result<bool> {
+    let ffmpeg = ffmpeg.as_ref();
+    let ffmpeg_disp = Path::new(ffmpeg).display();
     let status = match std::process::Command::new(ffmpeg)
         .args(["-nostdin", "-y", "-loglevel", "error", "-i"])
         .arg(wav)
@@ -133,12 +135,12 @@ fn encode_ogg(ffmpeg: &str, wav: &Path, ogg: &Path) -> Result<bool> {
     {
         Ok(status) => status,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error).with_context(|| format!("starting {ffmpeg}")),
+        Err(error) => return Err(error).with_context(|| format!("starting {ffmpeg_disp}")),
     };
     if !status.success() {
         let _ = std::fs::remove_file(ogg);
         return Err(anyhow!(
-            "{ffmpeg} could not encode {} ({status}); the bake needs an ffmpeg with the \
+            "{ffmpeg_disp} could not encode {} ({status}); the bake needs an ffmpeg with the \
              libvorbis encoder (`ffmpeg -hide_banner -encoders | grep libvorbis`)",
             ogg.display()
         ));

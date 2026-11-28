@@ -477,6 +477,7 @@ mod tests {
             extra_mips: vec![],
             detail: None,
             bump: None,
+            env: None,
         };
         assert_eq!(
             alpha_semantics(&texture(0)).unwrap(),
@@ -492,6 +493,7 @@ mod tests {
             extra_mips: vec![],
             detail: None,
             bump: None,
+            env: None,
         };
         assert!(alpha_semantics(&t).is_err());
     }

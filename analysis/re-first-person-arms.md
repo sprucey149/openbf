@@ -107,8 +107,9 @@ Row-vector matrices (`v' = v · M`) on the PS2; in column form:
 - The draw `FUN_001a4250` (B1:47736-47774) runs only for the player's own view: the arms model (+0x16ac) at +0x1620 with the posed
   bone table, then the weapon instance in hand (+0x16b0) through its own vtable slot (+0x14 → +0x64) at +0x1660.
 - Its model is the weapon class's `HighResGeometry` (0x8b3185dd, B1 class+0x50, B2 +0x78): `*_1st_weap_inf_*`,
-  `com_1st_weap_inf_*`, each with an `hp_fire` node [M]. What that slot draws for a weapon without one is not traced
-  [H: nothing]; every soldier weapon on both discs names one [M].
+  `com_1st_weap_inf_*`, each with an `hp_fire` node [M]. BF2 draws a weapon without one with its `GeometryName`
+  model (+0x74) [V: `FUN_0032b228`, `FUN_0033e018` take +0x78 for the first-person draw and +0x74 when it is 0];
+  BF1's case is not traced. Every soldier weapon on both discs names one [M].
 - The muzzle flash and the drawn bolt leave the weapon's fire point on that model [D: the flash rides the drawn weapon,
   `re-muzzle-flash.md` §5].
 

@@ -153,12 +153,17 @@ pub fn mission_side_files(game: &str, map: &str) -> &'static [&'static str] {
     }
 }
 
+/// Is `key` the PS2's team 0 class key? Team 0 is the Neutral side:
+/// `ClassNeutral` in all three columns of its table row.
+pub fn is_neutral_class_key(key: u32) -> bool {
+    key == fnv1a_lowercase("ClassNeutral")
+}
+
 /// Which port team a pad prop's key assigns its class to, for a battle of
 /// `factions` (port team 0 = PS2 team 1), or `None` (not a class key, or a
-/// key for a side the battle does not field).
+/// key for a side the battle does not field, or [`is_neutral_class_key`]).
 pub fn class_key_team(key: u32, factions: &[String; 2]) -> Option<u8> {
-    // PS2 team 0 is the Neutral side: `ClassNeutral` in all three columns.
-    if key == fnv1a_lowercase("ClassNeutral") {
+    if is_neutral_class_key(key) {
         return None;
     }
     for (t, f) in factions.iter().enumerate() {
@@ -340,11 +345,17 @@ pub fn build(
     let bf2 = m.source_game.eq_ignore_ascii_case("bf2");
     let mut out = PadBuild::default();
     for inst in m.instances.iter().filter(|i| i.class == PAD_CLASS) {
-        let mut classes: [Option<PadClass>; 2] = [None, None];
+        // Slots 0, 1 are the port teams; 2 is the PS2's team 0.
+        let mut classes: [Option<PadClass>; 3] = [None, None, None];
         // In prop order: a later key for the same team slot wins, as the
         // setter's store does.
         for (k, v) in &inst.props {
-            let Some(t) = class_key_team(*k, factions) else {
+            let slot = if is_neutral_class_key(*k) {
+                Some(2)
+            } else {
+                class_key_team(*k, factions)
+            };
+            let Some(t) = slot else {
                 continue;
             };
             let name = v.trim().to_ascii_lowercase();
@@ -406,6 +417,13 @@ pub fn build(
                 .find(|i| i.name.eq_ignore_ascii_case(z.trim()))
         });
         let team = port_team(post.unwrap_or(inst));
+        let cp = zone.and_then(|z| cp_index(z.trim()));
+        // The port's "no team" also covers the locals and −1; the neutral
+        // class is the PS2's team 0 alone: a pad that authors it, or one
+        // that follows a post (whose unowned state is team 0).
+        let ps2_team = prop(inst, "Team").map_or(Some(0), |s| s.trim().parse::<i32>().ok());
+        let [first, second, neutral] = classes;
+        let neutral = neutral.filter(|_| cp.is_some() || ps2_team == Some(0));
         let f = |key: &str, default: f32| {
             prop(inst, key)
                 .and_then(|s| s.trim().parse::<f32>().ok())
@@ -415,7 +433,7 @@ pub fn build(
             name: inst.name.clone(),
             pos: Vec3::from(inst.translation),
             yaw: yaw_of(&inst.rotation),
-            cp: zone.and_then(|z| cp_index(z.trim())),
+            cp,
             team,
             spawn_time: f("SpawnTime", SPAWN_TIME),
             decay_time: f("DecayTime", DECAY_TIME),
@@ -424,7 +442,8 @@ pub fn build(
             } else {
                 1
             },
-            classes,
+            classes: [first, second],
+            neutral,
         });
     }
     add_turrets(&mut out, &m.instances, db, bf2);
@@ -647,15 +666,18 @@ pub fn install_for_mission(
         .iter()
         .map(|c| vehicle_class::landed_height(&db, c, |k| floors.get(k).copied()))
         .collect();
-    let vis_boxes: HashMap<String, ([f32; 3], [f32; 3])> = sides
-        .iter()
-        .flat_map(|(_, vm)| &vm.vehicles)
-        .filter_map(|v| Some((v.class.name.to_ascii_lowercase(), v.vis_box?)))
-        .collect();
+    let mut vis_boxes: HashMap<String, ([f32; 3], [f32; 3])> = HashMap::new();
+    for v in sides.iter().flat_map(|(_, vm)| &vm.vehicles) {
+        if let Some(b) = v.vis_box {
+            vis_boxes
+                .entry(v.class.name.to_ascii_lowercase())
+                .or_insert(b);
+        }
+    }
     for c in b
         .pads
         .iter_mut()
-        .flat_map(|p| p.classes.iter_mut())
+        .flat_map(|p| p.classes.iter_mut().chain([&mut p.neutral]))
         .flatten()
     {
         c.landed_height = landed[c.spec.class as usize];

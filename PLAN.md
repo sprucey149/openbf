@@ -10,8 +10,9 @@ tasks. Everything after M3 below is later work and is not being built now.
 ## Architecture (locked)
 1. **Rust runtime + wgpu renderer**; cross-platform via Vulkan/Metal/DX12.
 2. **Offline asset bake** from the player's supported copies. LVL parsing happens exclusively during baking.
-3. **Data-driven missions, no Lua VM.** The Lua mod ecosystem is not a goal (2026-08-30, `analysis/community-projects.md`):
-   a mod worth having gets ported as a native feature.
+3. **Data-driven missions, no Lua VM at runtime.** The game binary never embeds a Lua VM or parses Lua bytecode.
+   Both campaign and content-mod mission scripts are translated offline during asset bake / mod conversion into
+   openbf's closed, deterministic action-tree IR and executed against explicit Rust engine bindings.
 4. **Original-game evidence.** Use the original games, executable analysis and PCSX2 comparisons to verify behaviour, and implement it in original Rust code.
 5. **Same content, classic-plus look.** Same models, maps, silhouettes and palette; modern lighting on by default, a strict
    render mode as a runtime toggle that never changes gameplay.

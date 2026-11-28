@@ -88,20 +88,22 @@ impl Plan {
     }
 }
 
-/// An LVL's decoded `tex_` chunks and the normal maps its models pair them
-/// with.
+/// An LVL's decoded `tex_` chunks, with the normal maps and environment
+/// cubes its models pair them with.
 pub(crate) struct LvlSheets {
     all: Vec<Texture>,
     first: HashMap<String, usize>,
     bumps: HashMap<String, crate::bump::Companion>,
+    /// [`crate::envmap`] cubes, keyed by diffuse.
+    envs: HashMap<String, crate::envmap::Cube>,
 }
 
 impl LvlSheets {
     pub fn parse(inner: &[u8]) -> Result<Self> {
         // Decode everything first: a wanted texture's `_dtl` companion can sit
         // anywhere in the LVL, including before the base (crate::detail).
-        let all: Vec<Texture> = mungefs::content_chunks(inner)
-            .map_err(|e| anyhow!("{e}"))?
+        let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
+        let all: Vec<Texture> = chunks
             .iter()
             .filter(|c| &c.tag == b"tex_")
             .filter_map(|c| Texture::parse(c).ok())
@@ -110,8 +112,18 @@ impl LvlSheets {
         for (i, t) in all.iter().enumerate() {
             first.entry(t.name.to_ascii_lowercase()).or_insert(i);
         }
-        let bumps = crate::bump::lvl_companions(inner)?;
-        Ok(Self { all, first, bumps })
+        let models = crate::bump::lvl_models(&chunks);
+        let bumps = crate::bump::companions(&models);
+        let envs = crate::envmap::companions(&models)
+            .into_iter()
+            .filter_map(|(base, cube)| Some((base, crate::envmap::find_cube(&chunks, &cube)?)))
+            .collect();
+        Ok(Self {
+            all,
+            first,
+            bumps,
+            envs,
+        })
     }
 
     /// The names of `wanted` (lowercase) the LVL has, each once, in LVL order.
@@ -197,6 +209,8 @@ impl LvlSheets {
         // companion cannot come from two different tiers.
         crate::detail::write_detail_for(dir, t, &self.all)?;
         crate::bump::write_bump_for(dir, name, &self.bumps, &self.all)?;
+        let base = name.to_ascii_lowercase();
+        crate::envmap::write_cube(dir, &base, self.envs.get(&base))?;
         Ok(tier2.is_some())
     }
 }

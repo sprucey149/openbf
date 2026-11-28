@@ -1340,6 +1340,12 @@ def build(a, out, plan, packs, visual_report):
     out_dir = os.path.dirname(out)
     installed_launcher = install_companion_bin(launcher_bin, out_dir, "openbf-launcher" + EXE)
     installed_bake = install_companion_bin(bake, out_dir, "bake" + EXE)
+    ffmpeg_src = os.environ.get("OPENBF_FFMPEG") or shutil.which("ffmpeg")
+    tools_dir = os.path.join(out_dir, "openbf_data", "tools")
+    installed_ffmpeg = None
+    if ffmpeg_src and os.path.isfile(ffmpeg_src):
+        os.makedirs(tools_dir, exist_ok=True)
+        installed_ffmpeg = install_companion_bin(ffmpeg_src, tools_dir, "ffmpeg" + EXE)
     bundle = a.app_bundle if a.app_bundle is not None else MACOS
     if bundle:
         app, left = build_app_bundle(out, ICNS)
@@ -1347,6 +1353,10 @@ def build(a, out, plan, packs, visual_report):
         for companion in (installed_launcher, installed_bake):
             if companion and os.path.isfile(companion):
                 os.replace(companion, os.path.join(macos_dir, os.path.basename(companion)))
+        if installed_ffmpeg and os.path.isfile(installed_ffmpeg):
+            bundle_tools = os.path.join(macos_dir, "openbf_data", "tools")
+            os.makedirs(bundle_tools, exist_ok=True)
+            os.replace(installed_ffmpeg, os.path.join(bundle_tools, os.path.basename(installed_ffmpeg)))
         lines.append(f"bundle: {app}. Run it from Finder. openbf.pak and openbf_data/ stay in Contents/MacOS, "
                      "beside the game.")
         if left:

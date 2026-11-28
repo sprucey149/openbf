@@ -314,7 +314,8 @@ impl Texts {
 
     /// A team's name: `common.sides.<faction>.name` ("Rebels", "Empire").
     pub fn team_name(&self, faction: &str) -> String {
-        self.bf2_text(&format!("common.sides.{faction}.name"))
+        let side = side_key(faction);
+        self.bf2_text(&format!("common.sides.{side}.name"))
             .filter(|t| !t.trim().is_empty())
             .map_or_else(
                 || match faction {
@@ -401,6 +402,21 @@ impl Texts {
                 .collect()
         };
         (list("firstnames"), list("lastnames"))
+    }
+}
+
+/// The text key's side for a script's team name. Hero Assault scripts call
+/// their teams "hero" and "villain", filed under the plural keys (PS2
+/// `FUN_0036d6e0` sorts the spellings into kinds, and `SetTeamName`'s kinds 6
+/// and 7 read `common.sides.heroes.name` / `.villains.name`).
+fn side_key(faction: &str) -> &str {
+    let is = |names: &[&str]| names.iter().any(|n| faction.eq_ignore_ascii_case(n));
+    if is(&["hero", "heroes", "her"]) {
+        "heroes"
+    } else if is(&["villain", "villains", "vil"]) {
+        "villains"
+    } else {
+        faction
     }
 }
 
@@ -664,6 +680,11 @@ impl EventFeed {
             [&walk.teams[0].faction, &walk.teams[1].faction],
             &walk.post_keys,
         );
+        for (slot, tmpl) in walk.teams.iter().enumerate() {
+            if let Some(ref custom) = tmpl.display_name {
+                feed.teams[slot].0 = custom.clone();
+            }
+        }
         feed.space_round = walk.space_round.clone();
         feed.set_opening_medals(walk);
         let hunt = walk.sim.is_hunt();

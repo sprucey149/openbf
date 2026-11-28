@@ -203,6 +203,11 @@ pub(crate) fn build_launch_command(
     }
     cmd.env(extensions::profile::LAUNCHED_BY_LAUNCHER_ENV, "1");
     cmd.env(extensions::profile::DATA_DIR_ENV, &paths.data_dir);
+    if config.group_maps_by_source {
+        cmd.env(extensions::profile::GROUP_MAPS_ENV, "1");
+    } else {
+        cmd.env_remove(extensions::profile::GROUP_MAPS_ENV);
+    }
     if force_desktop {
         cmd.arg("--desktop");
     }

@@ -176,7 +176,7 @@ impl ComboRuntime {
             let at = time(sound, 1, clip, duration);
             if !self.sound_played && self.time >= at {
                 self.sound_played = true;
-                out.sound = sound.text(0);
+                out.sound = sound.text(0).filter(|s| !s.trim().is_empty());
             }
         }
         if let Some(rate) = state.find(K::EnergyRestoreRate) {

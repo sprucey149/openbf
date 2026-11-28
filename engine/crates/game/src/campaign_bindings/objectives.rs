@@ -53,6 +53,10 @@ impl Ctx<'_> {
                 }
                 nothing()
             }
+            "SetFlagGameplayType" => {
+                w.flag_gameplay = arg(a, 0).as_str().map(str::to_ascii_lowercase);
+                nothing()
+            }
             "GetTeamPoints" => one(Value::Num(
                 sim_team(arg(a, 0))
                     .filter(|t| *t < 2)

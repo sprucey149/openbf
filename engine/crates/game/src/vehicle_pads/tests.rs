@@ -215,6 +215,55 @@ fn gcw() -> [String; 2] {
     ["all".into(), "imp".into()]
 }
 
+/// `ClassNeutral` is the PS2's team 0 (FUN_00371990): a pad whose team is 0
+/// keeps it, a pad that starts owned by a team and follows no post does not.
+#[test]
+fn a_team_zero_pad_keeps_its_neutral_class() {
+    let k = fnv1a_lowercase;
+    let classes = vec![crate::classdb::ClassDef {
+        name: "t_tank".into(),
+        kind: "entc".into(),
+        base: "hover".into(),
+        props: vec![(k("MaxHealth"), "100".into())],
+    }];
+    let path = std::env::temp_dir().join(format!("openbf-neutral-{}.ron", std::process::id()));
+    std::fs::write(&path, ron::to_string(&classes).unwrap()).unwrap();
+    let mut db = ClassDb::default();
+    db.load(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    let pad = |name: &str, team: Option<&str>| {
+        let mut props = vec![(k("ClassNeutral"), "t_tank".to_string())];
+        if let Some(t) = team {
+            props.push((k("Team"), t.into()));
+        }
+        ManifestInstance {
+            class: PAD_CLASS.into(),
+            name: name.into(),
+            rotation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            translation: [0.0; 3],
+            props,
+        }
+    };
+    let mut m: Manifest = ron::from_str(
+        r#"(map: "t", source_game: "bf2", terrain_name: None, sky_name: None, terrain_glb: None,
+            models: [], textures: [], classes: [], geometries: [], regions: [], instances: [],
+            collision: [], layers: [])"#,
+    )
+    .unwrap();
+    m.instances = vec![
+        pad("zero", Some("0")),
+        pad("unset", None),
+        pad("owned", Some("1")),
+    ];
+    let built = build(&m, &db, &gcw(), |_| None);
+    assert_eq!(built.classes, ["t_tank"]);
+    let neutral: Vec<bool> = built.pads.iter().map(|p| p.neutral.is_some()).collect();
+    assert_eq!(neutral, [true, true, false]);
+    assert!(built.pads[0].class_for(None).is_some());
+    assert!(built.pads[0].class_for(Some(0)).is_none());
+}
+
 /// The side table as re_check word 0x5183a0 decodes it: Atk only for
 /// team 1, Def only for team 2, the full side name for either.
 #[test]

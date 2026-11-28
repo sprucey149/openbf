@@ -6,10 +6,11 @@
 //! at that LVL's path below `_LVL_PC`. Whatever folder a mod was extracted
 //! into, its relative path, filename, chunk layout and resource names are the
 //! evidence for which stock file it stands in for. [`resolve_replacements`]
-//! weighs that evidence against the stock catalog ([`super::catalog`]) and
-//! never guesses: a file it cannot place is `Ambiguous` or `Unresolved` until
-//! the player picks a target in the launcher (persisted in
-//! [`TargetSelections`]) or the mod's optional `openbf_mod.ron` names one.
+//! weighs that evidence against the Battlefront II stock catalog
+//! ([`super::catalog`]), the only game whose mods are supported, and never
+//! guesses: a file it cannot place is `Ambiguous` or `Unresolved` and stays
+//! stock unless [`TargetSelections`] or the mod's optional `openbf_mod.ron`
+//! names a target.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -89,7 +90,7 @@ pub enum OpStatus {
     Identical,
     /// Deliberately not applied (backup folder, superseded copy, ignored).
     Inactive(String),
-    /// More than one stock LVL fits; the player must pick.
+    /// No single stock LVL clearly fits; nothing is replaced.
     Ambiguous,
     /// No stock LVL fits.
     Unresolved(String),
@@ -103,7 +104,7 @@ impl OpStatus {
             Self::Active => "Active",
             Self::Identical => "Same as stock",
             Self::Inactive(_) => "Inactive",
-            Self::Ambiguous => "Choose target",
+            Self::Ambiguous => "Unclear target",
             Self::Unresolved(_) => "No target",
             Self::Unsupported(_) => "Unsupported",
         }
@@ -116,7 +117,7 @@ impl OpStatus {
         }
     }
 
-    pub fn needs_user(&self) -> bool {
+    pub fn is_ambiguous(&self) -> bool {
         matches!(self, Self::Ambiguous)
     }
 }
@@ -585,13 +586,17 @@ fn resolve_one(
     let anchor = anchored(&segs);
     if let Some(seg) = dirs.iter().find(|s| aside_segment(s)) {
         op.status = OpStatus::Inactive(format!(
-            "inside `{seg}`, which reads as a backup or alternative folder; choose a target to use it"
+            "inside `{seg}`, which reads as a backup or alternative folder"
         ));
         return op;
     }
 
     let mut cands: Vec<(Candidate, &CatalogLvl)> = Vec::new();
-    for cat in &catalogs.catalogs {
+    for cat in catalogs
+        .catalogs
+        .iter()
+        .filter(|c| c.game == SourceGame::Bf2)
+    {
         for lvl in &cat.lvls {
             let depth = suffix_depth(&segs, &lvl.path);
             if depth == 0 {
@@ -621,11 +626,6 @@ fn resolve_one(
         return op;
     }
 
-    if let Some(g) = src.facts.game {
-        if cands.iter().any(|(c, _)| c.target.game == g) {
-            cands.retain(|(c, _)| c.target.game == g);
-        }
-    }
     let platform_hint = src.facts.platform.or(anchor.map(|(_, p)| p));
     if let Some(p) = platform_hint {
         if cands.iter().any(|(c, _)| c.target.platform == p) {
@@ -711,7 +711,7 @@ fn resolve_one(
         None => {
             op.status = OpStatus::Ambiguous;
             op.evidence.push(format!(
-                "{} stock LVLs fit equally well; choose one",
+                "none of {} stock LVLs fits clearly enough",
                 best.len()
             ));
             op
@@ -720,8 +720,8 @@ fn resolve_one(
 }
 
 /// Why an empty LVL over a stocked one produces nothing, whichever of its
-/// targets it has: a file that matches several is refused here too, so the
-/// player is never asked for a choice that cannot change the output.
+/// targets it has: a file that matches several is refused here too, so it is
+/// reported as unsupported and not as an unclear target.
 const BLANKS_STOCK: &str =
     "an empty LVL blanks the stock file; removing a whole stock LVL is not supported";
 
@@ -814,7 +814,7 @@ fn settle_duplicates(ops: &mut [ResourceOp]) {
             for &i in &idx {
                 ops[i].status = OpStatus::Ambiguous;
                 ops[i].evidence.push(format!(
-                    "{} files in this mod target {}; choose which one to use",
+                    "{} files in this mod target {} equally well",
                     idx.len(),
                     target.label()
                 ));
@@ -1014,11 +1014,15 @@ mod tests {
     }
 
     #[test]
-    fn loose_end1_resolves_by_game_and_content() {
-        let f = facts("m-end", SourceGame::Bf1, vec![res("tex_", "end_rock", 5)]);
+    fn loose_end1_resolves_to_bf2_and_never_bf1() {
+        let f = facts("m-end", SourceGame::Bf2, vec![res("tex_", "end_tree", 5)]);
         let ops = resolve(vec![("end1.lvl", f)], &BTreeMap::new());
         assert_eq!(ops[0].status, OpStatus::Active);
-        assert_eq!(ops[0].target.as_ref().unwrap().label(), "bf1 pc:end/end1.lvl");
+        assert_eq!(
+            ops[0].target.as_ref().unwrap().label(),
+            "bf2 pc:end/end1.lvl"
+        );
+        assert_eq!(ops[0].candidates.len(), 1);
     }
 
     #[test]
@@ -1040,12 +1044,12 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_file_over_several_stocked_targets_asks_for_no_choice() {
+    fn an_empty_file_over_several_stocked_targets_is_unsupported() {
         let mut f = facts("m-stub", SourceGame::Bf2, Vec::new());
         f.stub = true;
         let ops = resolve(vec![("allxwing.lvl", f)], &BTreeMap::new());
         assert!(matches!(&ops[0].status, OpStatus::Unsupported(r) if r == BLANKS_STOCK));
-        assert!(!ops[0].status.needs_user());
+        assert!(!ops[0].status.is_ambiguous());
         assert_eq!(ops[0].candidates.len(), 2);
     }
 

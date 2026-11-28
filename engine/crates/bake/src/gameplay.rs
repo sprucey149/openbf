@@ -410,7 +410,7 @@ pub fn exempt_addon(path: &Path) {
 
 static ADDONS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-fn is_addon(path: &Path) -> bool {
+pub(super) fn is_addon(path: &Path) -> bool {
     let raw = norm_cmp_path(path);
     let canon = std::fs::canonicalize(path).ok().map(|p| norm_cmp_path(&p));
     let exempt = ADDONS.lock().unwrap_or_else(|e| e.into_inner());

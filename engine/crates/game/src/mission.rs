@@ -150,6 +150,11 @@ pub struct MissionDef {
     /// late and 2026-11-21: Hunt-only easier AI. No other mode reads it.
     #[serde(default)]
     pub hunt_skill_pct: Option<[[u32; 2]; 4]>,
+    /// How the converter ran this addon script's setup, `(math.random value,
+    /// multiplayer)`: the rosters above are that run's, so the `ScriptInit`
+    /// replay must take the same values (a V.I.P. is picked there).
+    #[serde(default)]
+    pub script_setup: Option<(Option<i64>, bool)>,
     /// PS2 `SetHeroClass` in Lua team order; BF1 identities use BF2 playable kits.
     #[serde(default)]
     pub heroes: Vec<(u8, String)>,
@@ -160,6 +165,10 @@ pub struct MissionDef {
     #[serde(default)]
     pub class_load_order: Vec<SideClassLoad>,
     pub teams: Vec<TeamDef>,
+    /// Custom team display names from v1.3 `SupportsCustomEraTeams` /
+    /// `CustomEraTeam1` / `CustomEraTeam2` script globals (in mission team order).
+    #[serde(default)]
+    pub custom_team_names: Option<[String; 2]>,
     /// Alive-AI cap per team. BF2 conquest: the NumBots default, 16. BF1:
     /// there is no cap below the member pool, so this is the larger of the
     /// two unit counts and `initial_ai` clamps each team to its own pool.
@@ -313,12 +322,29 @@ pub struct MissionDef {
     /// Singleplayer campaign objectives, movies, and mid-round mutations (`mode == "campaign"`).
     #[serde(default)]
     pub campaign: Option<CampaignMissionDef>,
+    /// `SetClassProperty(class, prop, val)` calls folded from `ScriptInit` (mod missions).
+    #[serde(default)]
+    pub class_properties: Vec<(String, String, String)>,
+    /// Translated mission action-tree IR for scripted mod / custom modes.
+    #[serde(default)]
+    pub script: Option<manifest::script_ir::ScriptDef>,
+    /// Mod-local `ScriptCB_DoFile` libraries `(lower_name, ron_filename)` under `missions/`.
+    #[serde(default)]
+    pub script_libs: Vec<(String, String)>,
+    /// Loaded `ScriptCB_DoFile` libraries for [`Self::script`] (mod-local + stock fallback).
+    #[serde(skip)]
+    pub loaded_script_libs: Vec<(String, std::sync::Arc<manifest::script_ir::ScriptDef>)>,
     /// The PC .lua and PS2 script this record was read out of.
     #[serde(default)]
     pub source: String,
 }
 
 impl MissionDef {
+    /// Whether this mission runs an action-tree script (campaign or scripted mod mode).
+    pub fn has_script(&self) -> bool {
+        self.is_campaign() || self.script.is_some()
+    }
+
     /// Whether the player can choose teams (`Side` stage) on the spawn screen.
     pub fn allows_side_select(&self) -> bool {
         self.allow_side_select.unwrap_or(!self.is_campaign())
@@ -552,13 +578,70 @@ pub fn pick_index(missions: &[[String; 2]], armies: [&str; 2]) -> Option<(usize,
 /// list (BF2 Hoth's back shields and shield generator, Kashyyyk's flag
 /// bases). Other modes keep their scene as baked; a missing or unreadable
 /// mission removes nothing.
-pub fn scene_kills(dir: &Path, map: &str, mode: &str) -> Vec<String> {
+pub fn scene_kills(dir: &Path, map: &str, mode: &str, era: Option<&str>) -> Vec<String> {
     if mode != "hunt" {
         return Vec::new();
     }
-    MissionDef::load(&dir.join(format!("{map}_hunt.ron")))
+    let file = match custom_era(era) {
+        Some(era) => format!("{map}_hunt_era_{era}.ron"),
+        None => format!("{map}_hunt.ron"),
+    };
+    MissionDef::load(&dir.join(file))
         .map(|m| m.scene_kills().to_vec())
         .unwrap_or_default()
+}
+
+#[derive(Deserialize)]
+struct TeamFactionOnly {
+    faction: String,
+    #[serde(default)]
+    tickets: u32,
+}
+
+#[derive(Deserialize)]
+struct MissionFactionsOnly {
+    teams: Vec<TeamFactionOnly>,
+    #[serde(default)]
+    campaign: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    script: Option<serde::de::IgnoredAny>,
+}
+
+/// Fast path for shell catalog discovery: read only the two team faction names
+/// without deserializing `script` trees or loading `script_libs`/`campaign/lib`.
+fn load_factions_fast(path: &Path) -> Result<[String; 2]> {
+    use std::io::Read;
+    if let Ok(r) = pak::open(path) {
+        let mut buf = Vec::with_capacity(16 * 1024);
+        if r.take(16 * 1024).read_to_end(&mut buf).is_ok() {
+            if let Ok(head) = std::str::from_utf8(&buf) {
+                if let Some(start) = head.find("\n    teams: [") {
+                    let after_key = &head[start + "\n    teams: ".len()..];
+                    if let Some(end) = after_key.find("\n    ],") {
+                        let slice = &after_key[..end + "\n    ]".len()];
+                        if let Ok(teams) = ron::from_str::<Vec<TeamFactionOnly>>(slice) {
+                            if teams.len() == 2 && teams.iter().all(|t| t.tickets > 0) {
+                                return Ok([teams[0].faction.clone(), teams[1].faction.clone()]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let txt = pak::read_to_string(path).with_context(|| path.display().to_string())?;
+    let m: MissionFactionsOnly = ron::Options::default()
+        .without_recursion_limit()
+        .from_str(&txt)
+        .with_context(|| format!("parse {}", path.display()))?;
+    if m.teams.len() != 2 {
+        anyhow::bail!("{}: v0 missions need exactly two teams", path.display());
+    }
+    let has_script = m.campaign.is_some() || m.script.is_some();
+    if !has_script && m.teams.iter().any(|t| t.tickets == 0) {
+        anyhow::bail!("{}: team has 0 reinforcements", path.display());
+    }
+    Ok([m.teams[0].faction.clone(), m.teams[1].faction.clone()])
 }
 
 /// The faction pairs of `map`'s mission files for `mode` in `dir` (each era
@@ -568,14 +651,85 @@ pub fn pairs(dir: &Path, map: &str, mode: &str) -> Vec<[String; 2]> {
         .iter()
         .map(|s| dir.join(format!("{map}_{mode}{s}.ron")))
         .filter(|p| pak::is_file(p))
-        .filter_map(|p| MissionDef::load(&p).ok())
-        .map(|m| m.factions())
+        .filter_map(|p| load_factions_fast(&p).ok())
         .collect()
+}
+
+/// Like [`pairs`], but checks `existing` (a pre-scanned set of filenames in
+/// `dir`) to avoid per-file stat/overlay probes when building the Instant
+/// Action catalog across many maps and mods.
+pub fn pairs_with_index(
+    dir: &Path,
+    existing: &std::collections::HashSet<String>,
+    map: &str,
+    mode: &str,
+) -> Vec<[String; 2]> {
+    ERA_SUFFIXES
+        .iter()
+        .filter_map(|s| {
+            let name = format!("{map}_{mode}{s}.ron");
+            existing
+                .contains(&name.to_ascii_lowercase())
+                .then(|| dir.join(name))
+        })
+        .filter_map(|p| load_factions_fast(&p).ok())
+        .collect()
+}
+
+/// Like [`pairs_with_index`], for a mod-declared custom era (`<map>_<mode>_era_<era>.ron`).
+pub fn pairs_for_era_with_index(
+    dir: &Path,
+    existing: &std::collections::HashSet<String>,
+    map: &str,
+    mode: &str,
+    era: &str,
+) -> Vec<[String; 2]> {
+    let name = format!("{map}_{mode}_era_{era}.ron");
+    if !existing.contains(&name.to_ascii_lowercase()) {
+        return Vec::new();
+    }
+    load_factions_fast(&dir.join(name)).into_iter().collect()
 }
 
 /// [`pick_index`] over the mission files of `map` in `dir`. `None` when the
 /// map has no mission file for `mode`.
 pub fn pick(dir: &Path, map: &str, mode: &str, armies: [&str; 2]) -> Option<Pick> {
+    pick_for_era(dir, map, mode, armies, None)
+}
+
+/// `era` when it is a mod's own, which names its mission files.
+fn custom_era(era: Option<&str>) -> Option<&str> {
+    era.filter(|e| !e.is_empty() && !matches!(*e, "cw" | "gcw"))
+}
+
+/// Like [`pick`], targeting a mod-declared custom era (`<map>_<mode>_era_<era>.ron`)
+/// when `era` is `Some(code)` outside stock `"cw"`/`"gcw"`.
+pub fn pick_for_era(
+    dir: &Path,
+    map: &str,
+    mode: &str,
+    armies: [&str; 2],
+    era: Option<&str>,
+) -> Option<Pick> {
+    if let Some(custom) = custom_era(era) {
+        let path = dir.join(format!("{map}_{mode}_era_{custom}.ron"));
+        match MissionDef::load(&path) {
+            Ok(mission) => {
+                return Some(Pick {
+                    path,
+                    mission,
+                    player_team: 0,
+                    own: true,
+                });
+            }
+            Err(e) => {
+                if pak::is_file(&path) {
+                    eprintln!("mission: {e:#}");
+                }
+                return None;
+            }
+        }
+    }
     let mut found: Vec<(PathBuf, MissionDef)> = ERA_SUFFIXES
         .iter()
         .filter_map(|s| {
@@ -623,13 +777,37 @@ impl MissionDef {
             .with_context(|| format!("parse {}", path.display()))?;
         if let Some(c) = m.campaign.as_mut() {
             c.libs = load_campaign_libs(&path.parent().unwrap_or(Path::new(".")).join("lib"))?;
+        } else if m.script.is_some() {
+            let parent = path.parent().unwrap_or(Path::new("."));
+            let mut libs: Vec<(String, std::sync::Arc<manifest::script_ir::ScriptDef>)> =
+                Vec::new();
+            for (logical, ron_name) in &m.script_libs {
+                let lib_path = parent.join(ron_name);
+                if let Ok(lib_txt) = pak::read_to_string(&lib_path) {
+                    if let Ok(def) = ron::Options::default()
+                        .without_recursion_limit()
+                        .from_str::<manifest::script_ir::ScriptDef>(&lib_txt)
+                    {
+                        libs.push((logical.to_ascii_lowercase(), std::sync::Arc::new(def)));
+                    }
+                }
+            }
+            // Fallback to stock campaign shared libraries (`ObjectiveConquest`, `setup_teams`, etc.).
+            if let Ok(stock) = load_campaign_libs(&parent.join("campaign").join("lib")) {
+                for (name, def) in stock {
+                    if !libs.iter().any(|(n, _)| n.eq_ignore_ascii_case(&name)) {
+                        libs.push((name, def));
+                    }
+                }
+            }
+            m.loaded_script_libs = libs;
         }
         if m.teams.len() != 2 {
             anyhow::bail!("{}: v0 missions need exactly two teams", path.display());
         }
         // A team with no reinforcements can never spawn anyone in normal skirmish
-        // modes; campaign scripts author `-1` (unlimited) on defender/AI pools.
-        if !m.is_campaign() {
+        // modes; campaign and scripted mod missions may author `-1` (unlimited) or set tickets in script.
+        if !m.has_script() {
             if let Some(t) = m.teams.iter().find(|t| t.tickets == 0) {
                 anyhow::bail!(
                     "{}: team '{}' has 0 reinforcements — a round with no tickets \
@@ -1714,13 +1892,111 @@ mod tests {
         assert_eq!(c2.flags[0].geometry.as_deref(), Some("imp_icon_flag"));
         assert!(two_flag.is_ctf());
     }
+
+    #[test]
+    fn load_factions_fast_reads_pretty_and_compact_missions_without_libs() {
+        let dir = std::env::temp_dir().join(format!("openbf_mission_fast_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pretty = dir.join("m1_con.ron");
+        std::fs::write(
+            &pretty,
+            "(\n    map: \"m1\",\n    mode: \"con\",\n    source_game: \"bf2\",\n    teams: [\n        (\n            faction: \"all\",\n            units: 32,\n            tickets: 150,\n        ),\n        (\n            faction: \"imp\",\n            units: 32,\n            tickets: 150,\n        ),\n    ],\n    script: Some((functions: [])),\n)\n",
+        )
+        .unwrap();
+        assert_eq!(load_factions_fast(&pretty).unwrap(), ["all", "imp"]);
+
+        let compact = dir.join("m2_con.ron");
+        std::fs::write(
+            &compact,
+            "(map:\"m2\",mode:\"con\",source_game:\"bf2\",teams:[(faction:\"rep\",units:32,tickets:0),(faction:\"cis\",units:32,tickets:0)],script:Some((functions:[])))",
+        )
+        .unwrap();
+        assert_eq!(load_factions_fast(&compact).unwrap(), ["rep", "cis"]);
+
+        let zero_no_script = dir.join("m3_con.ron");
+        std::fs::write(
+            &zero_no_script,
+            "(map:\"m3\",mode:\"con\",source_game:\"bf2\",teams:[(faction:\"rep\",units:32,tickets:0),(faction:\"cis\",units:32,tickets:150)])",
+        )
+        .unwrap();
+        assert!(load_factions_fast(&zero_no_script).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pick_for_era_distinguishes_custom_era_from_gcw_with_same_factions() {
+        let dir = std::env::temp_dir().join(format!(
+            "openbf_mission_custom_era_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ron = |era: &str, custom_names: &str| {
+            format!(
+                r#"(
+    map: "mod_tst__tst",
+    mode: "con",
+    source_game: "bf2",
+    teams: [
+        (faction: "all", units: 16, tickets: 150, classes: []),
+        (faction: "imp", units: 16, tickets: 150, classes: []),
+    ],
+    {custom_names}
+    ai_alive_cap: 16,
+    spawn_delay: 10.0,
+    spawn_interval: 0.25,
+    era: Some("{era}"),
+)"#
+            )
+        };
+        std::fs::write(dir.join("mod_tst__tst_con.ron"), ron("gcw", "")).unwrap();
+        std::fs::write(
+            dir.join("mod_tst__tst_con_era_y.ron"),
+            ron("y", r#"custom_team_names: Some(("New Republic", "Yuuzhan Vong")),"#),
+        )
+        .unwrap();
+
+        let gcw = pick_for_era(&dir, "mod_tst__tst", "con", ["all", "imp"], Some("gcw")).unwrap();
+        assert_eq!(gcw.mission.era.as_deref(), Some("gcw"));
+        assert_eq!(gcw.mission.custom_team_names, None);
+
+        let vong = pick_for_era(&dir, "mod_tst__tst", "con", ["all", "imp"], Some("y")).unwrap();
+        assert_eq!(vong.mission.era.as_deref(), Some("y"));
+        assert_eq!(
+            vong.mission.custom_team_names,
+            Some(["New Republic".to_owned(), "Yuuzhan Vong".to_owned()])
+        );
+
+        let existing: std::collections::HashSet<String> = [
+            "mod_tst__tst_con.ron".into(),
+            "mod_tst__tst_con_era_y.ron".into(),
+        ]
+        .into();
+        assert_eq!(
+            pairs_for_era_with_index(&dir, &existing, "mod_tst__tst", "con", "y"),
+            vec![["all".to_owned(), "imp".to_owned()]]
+        );
+        assert!(pairs_for_era_with_index(&dir, &existing, "mod_tst__tst", "con", "k").is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// The shared campaign scripts (`engine/missions/campaign/lib/*.ron`),
-/// sorted by name so every load lists them alike.
+/// sorted by name so every load lists them alike. Cached by directory so
+/// repeated mission loads do not re-parse every stock library RON.
 fn load_campaign_libs(
     dir: &Path,
 ) -> Result<Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type LibList = Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>;
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, LibList>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(dir) {
+        return Ok(hit.clone());
+    }
     let mut out = Vec::new();
     for path in pak::read_dir(dir).unwrap_or_default() {
         if path.extension().and_then(|e| e.to_str()) != Some("ron") {
@@ -1735,5 +2011,11 @@ fn load_campaign_libs(
         out.push((stem.to_ascii_lowercase(), std::sync::Arc::new(def)));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
+    if !out.is_empty() {
+        cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(dir.to_path_buf(), out.clone());
+    }
     Ok(out)
 }
