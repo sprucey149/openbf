@@ -288,10 +288,15 @@ impl AddonInspection {
                 .iter()
                 .filter(|load| Some(&load.path) != m.map_lvl_path.as_ref())
                 .cloned()
+                .map(|mut load| {
+                    load.rel_path.make_ascii_lowercase();
+                    load
+                })
                 .collect();
             by_lvl
                 .entry((
-                    key,
+                    // Each script spells the path in its own capitals.
+                    key.to_ascii_lowercase(),
                     companion_loads,
                     m.world_variant.clone(),
                     m.map_lvl_path.clone(),
@@ -304,7 +309,11 @@ impl AddonInspection {
         let mut used_map_keys: BTreeSet<String> = BTreeSet::new();
         let mut groups = Vec::new();
         let mut base_titles = Vec::new();
-        for ((source_lvl_rel, companion_loads, primary_variant, _, stock_row), list) in by_lvl {
+        for ((lvl_key, companion_loads, primary_variant, _, stock_row), list) in by_lvl {
+            let source_lvl_rel = list
+                .iter()
+                .find_map(|m| m.map_lvl_rel.clone())
+                .unwrap_or(lvl_key);
             let legacy_stem = Path::new(&source_lvl_rel)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -644,6 +653,47 @@ fn read_bounded(root_canon: &Path, path: &Path, max_bytes: u64) -> Result<Vec<u8
         ));
     }
     fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))
+}
+
+/// Whether the LVL at `path` holds nothing of a world: every chunk of it is
+/// sound or localized text. A script reads such a file (a bank or a string
+/// table of its own) beside its world.
+fn is_worldless_archive(root_canon: &Path, path: &Path) -> bool {
+    read_bounded(root_canon, path, MAX_LVL_BYTES)
+        .ok()
+        .and_then(|bytes| {
+            let chunks = crate::content_chunks(open(&bytes).ok()?).ok()?;
+            // `SoundBankList` is what a bank's samples are listed in
+            // ([`crate::soundbank`]).
+            let list = crate::fnv1a_lowercase("SoundBankList");
+            Some(
+                !chunks.is_empty()
+                    && chunks.iter().all(|c| {
+                        matches!(&c.tag, b"snd_" | b"Locl") || u32::from_le_bytes(c.tag) == list
+                    }),
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// Take the LVLs that hold nothing of a world out of what `mission` reads of
+/// its world, so that two scripts which differ only in them share a map.
+fn drop_worldless_loads(
+    mission: &mut InspectedMission,
+    root_canon: &Path,
+    known: &mut BTreeMap<PathBuf, bool>,
+) {
+    let mut worldless = |path: &PathBuf| {
+        *known
+            .entry(path.clone())
+            .or_insert_with(|| is_worldless_archive(root_canon, path))
+    };
+    mission.world_loads.retain(|load| !worldless(&load.path));
+    if mission.map_lvl_path.as_ref().is_some_and(&mut worldless) {
+        let last = mission.world_loads.last();
+        mission.map_lvl_rel = last.map(|load| load.rel_path.clone());
+        mission.map_lvl_path = last.map(|load| load.path.clone());
+    }
 }
 
 fn archive_has_base_world(root_canon: &Path, path: &Path) -> bool {
@@ -1675,6 +1725,7 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
 
     // Inspect mission scripts.
     let mut base_world_archives = BTreeMap::new();
+    let mut worldless_archives = BTreeMap::new();
     for ml_path in &mission_lvls {
         let Ok(bytes) = read_bounded(&root_canon, ml_path, MAX_LVL_BYTES) else {
             out.errors
@@ -1730,15 +1781,17 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
             }
             if let Some(proto) = script_protos.get(&low_name) {
                 let declared_era = addme_summary.script_eras.get(&low_name).map(String::as_str);
-                let fold = |analysis: &lua50::MissionScriptAnalysis| {
-                    fold_calls(
+                let mut fold = |analysis: &lua50::MissionScriptAnalysis| {
+                    let mut mission = fold_calls(
                         analysis,
                         &sc.name,
                         registered,
                         declared_era,
                         &root_canon,
                         lvl_pc.as_deref(),
-                    )
+                    );
+                    drop_worldless_loads(&mut mission, &root_canon, &mut worldless_archives);
+                    mission
                 };
                 let (single_player, multiplayer) =
                     lua50::analyze_standalone_variants(proto, &script_protos);

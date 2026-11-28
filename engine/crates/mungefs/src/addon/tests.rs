@@ -526,6 +526,11 @@ fn inspect_stock_map_mod(name: &str, scripts: &[(&str, Vec<u8>)]) -> AddonInspec
     for lvl in ["sky.lvl", "obj.lvl"] {
         fs::write(dir.join("data/_LVL_PC/TST").join(lvl), b"ucfb\x00\x00\x00\x00").unwrap();
     }
+    // A string table and a sound bank: no part of a world.
+    for (lvl, tag) in [("text.lvl", b"Locl"), ("bank.lvl", b"snd_")] {
+        let bytes = [&b"ucfb\x08\x00\x00\x00"[..], tag, &[0; 4]].concat();
+        fs::write(dir.join("data/_LVL_PC/TST").join(lvl), bytes).unwrap();
+    }
     let inspection = inspect_addon_dir(&dir);
     let _ = fs::remove_dir_all(&dir);
     inspection
@@ -563,6 +568,32 @@ fn a_mission_on_the_games_own_map_takes_that_map_with_the_mods_layers_on_it() {
     assert_eq!(groups.len(), 2);
     assert!(groups[0].variant_title.is_some());
     assert_eq!(groups[0].variant_title, groups[1].variant_title);
+}
+
+#[test]
+fn text_sound_and_spelling_do_not_split_a_map() {
+    let stock = ("cor\\cor1.lvl", "cor1_Conquest");
+    let insp = inspect_stock_map_mod(
+        "stock_map_one_world",
+        &[
+            (
+                "cor1a_con",
+                reading_script(&[stock, ("dc:TST\\sky.lvl", "cor1")]),
+            ),
+            (
+                "cor1a_ctf",
+                reading_script(&[
+                    ("dc:TST\\text.lvl", ""),
+                    ("dc:TST\\bank.lvl", ""),
+                    stock,
+                    ("dc:tst\\SKY.lvl", "cor1"),
+                ]),
+            ),
+        ],
+    );
+    let groups = insp.map_groups("mod_tst");
+    assert_eq!(groups.len(), 1, "warnings={:?}", insp.warnings);
+    assert_eq!(groups[0].missions.len(), 2);
 }
 
 #[test]
