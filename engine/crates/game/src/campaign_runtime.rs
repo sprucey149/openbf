@@ -432,6 +432,7 @@ pub(crate) struct World {
     /// `ScriptCB_InMultiplayer` while the setup is replayed.
     pub setup_multiplayer: bool,
     pub is_campaign: bool,
+    pub can_switch_sides: Option<bool>,
     pub post_loaded: bool,
     pub player: UnitHandle,
     pub player_team: u8,
@@ -458,6 +459,8 @@ pub(crate) struct World {
     pub team_points: [i32; 2],
     points_seen: [i32; 2],
     pub show_points: [bool; 2],
+    /// `SetFlagGameplayType("1flag" | "2flag" | "campaign" | "none")`.
+    pub flag_gameplay: Option<String>,
     pub objectives: Vec<ObjectiveLine>,
     pub hints: Vec<String>,
     pub flags: Vec<FlagEnt>,
@@ -651,6 +654,7 @@ impl CampaignRuntime {
             setup: false,
             setup_multiplayer: false,
             is_campaign: true,
+            can_switch_sides: None,
             post_loaded: false,
             player: UnitHandle { index: 0, gen: 0 },
             player_team: 0,
@@ -670,6 +674,7 @@ impl CampaignRuntime {
             team_points: [0; 2],
             points_seen: [0; 2],
             show_points: [false; 2],
+            flag_gameplay: None,
             objectives: Vec::new(),
             hints: Vec::new(),
             flags: Vec::new(),
@@ -701,6 +706,10 @@ impl CampaignRuntime {
             started: false,
             script_setup: None,
         }
+    }
+
+    pub fn can_switch_sides(&self) -> Option<bool> {
+        self.w.can_switch_sides
     }
 
     pub fn set_team_rosters(&mut self, team_classes: [Vec<String>; 2], team_units: [u32; 2]) {

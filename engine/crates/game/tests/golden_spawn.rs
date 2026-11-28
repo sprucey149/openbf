@@ -51,6 +51,7 @@ fn hud() -> ui::hud::HudModel {
         countdown: None,
         round_end: None,
         time_left: None,
+        objective_timer: None,
         messages: vec![ui::hud::HudMessage {
             text: "DX 178 killed Player 1".into(),
             color: ui::hud::message_color::OWN,

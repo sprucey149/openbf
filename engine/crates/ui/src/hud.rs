@@ -354,9 +354,11 @@ pub struct HudModel {
     pub countdown: Option<(bool, f32)>,
     /// The end of the round (issue #33): its banner, then its stats screens.
     pub round_end: Option<RoundEndModel>,
-    /// Seconds left on the round's time limit (BF2's `ShowTimer`, queue
-    /// TLO); `None` = no limit, and nothing is drawn.
+    /// Seconds left on the round's time limit (queue TLO); `None` = no limit.
     pub time_left: Option<f32>,
+    /// Seconds left on the script's `ShowTimer` countdown (`objectivetimer`
+    /// in BF2's HUD layout); `None` hides `objectivetimerGROUP`.
+    pub objective_timer: Option<f32>,
     /// The event lines that arrived since the last frame, oldest first.
     /// Each is shown once: hand a frame's lines over and forget them.
     pub messages: Vec<HudMessage>,
@@ -647,7 +649,7 @@ pub fn feed_with_reticle(
                 let pts = points[team];
                 put(
                     &format!("player1.team{slot}.texture"),
-                    EventValue::Text("hud_flag_icon".to_owned()),
+                    EventValue::Text("hud_target_flag_onscreen".to_owned()),
                 );
                 put(
                     &format!("player1.team{slot}.points"),
@@ -677,7 +679,11 @@ pub fn feed_with_reticle(
             );
             put(
                 &format!("player1.team{slot}.pointsText"),
-                EventValue::Text(format!("{pts}/{limit}")),
+                EventValue::Text(if limit > 0 {
+                    format!("{pts}/{limit}")
+                } else {
+                    format!("{pts}")
+                }),
             );
             put(
                 &format!("player1.team{slot}.reinforcementsDisable"),
@@ -762,6 +768,12 @@ pub fn feed_with_reticle(
     let target = m.target.as_ref().filter(|_| alive && m.reticle.is_some());
     feed_target(hud, target, has_mesh);
     feed_countdown(hud, m.countdown, has_mesh);
+    feed_objective_timer(
+        hud,
+        m.objective_timer
+            .filter(|_| m.spawn.is_none() && m.outcome.is_none()),
+        has_mesh,
+    );
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     if let (Some(rel), true, Some(position)) = (m.reticle, alive, reticle_position) {
         put(
@@ -1078,6 +1090,27 @@ fn feed_countdown(hud: &mut Hud, c: Option<(bool, f32)>, has_mesh: &dyn Fn(&str)
     if let Some((victory, secs)) = c {
         let side = SIDES[usize::from(!victory)];
         hud.publish(side, EventValue::Number(secs.max(0.0)), has_mesh);
+    }
+}
+
+/// BF2's native script timer (`ShowTimer` -> `objectivetimerGROUP` in
+/// `1playerhud.ron`): publishes `"objectivetimer"` with seconds left (formatted
+/// by `numbertotime` as `"%m:%02s"` in `gamefont_medium`) and
+/// `"objectivetimer.disable"` when hidden.
+fn feed_objective_timer(hud: &mut Hud, timer: Option<f32>, has_mesh: &dyn Fn(&str) -> bool) {
+    match timer {
+        Some(secs) => {
+            hud.publish(
+                "objectivetimer",
+                EventValue::Number(secs.max(0.0).ceil()),
+                has_mesh,
+            );
+        }
+        None if hud.last("objectivetimer").is_some() => {
+            hud.forget("objectivetimer");
+            hud.send("objectivetimer.disable", EventValue::None, has_mesh);
+        }
+        None => {}
     }
 }
 
@@ -1406,6 +1439,7 @@ mod tests {
             countdown: None,
             round_end: None,
             time_left: Some(125.0),
+            objective_timer: None,
             messages: Vec::new(),
             stats: None,
             player_team: 0,
@@ -1977,11 +2011,11 @@ mod team_points_tests {
         feed(&mut hud, &model, &|_| false);
         assert_eq!(
             hud.last("player1.team1.texture"),
-            Some(&EventValue::Text("hud_flag_icon".to_owned()))
+            Some(&EventValue::Text("hud_target_flag_onscreen".to_owned()))
         );
         assert_eq!(
             hud.last("player1.team2.texture"),
-            Some(&EventValue::Text("hud_flag_icon".to_owned()))
+            Some(&EventValue::Text("hud_target_flag_onscreen".to_owned()))
         );
         assert_eq!(
             hud.last("player1.team1.pointsText"),
@@ -2142,6 +2176,7 @@ mod draw_hud_in_tests {
     fn model() -> HudModel {
         HudModel {
             time_left: Some(125.0),
+            objective_timer: None,
             outcome: Some(1),
             team_names: ["rep".into(), "cis".into()],
             ..HudModel::default()

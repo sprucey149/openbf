@@ -246,7 +246,25 @@ fn bake(
         out.join("soldiers").join(format!("{companion}.glb")),
         crate::skin_glb::skinned_to_glb(&low, &[])?,
     )?;
-    let skins = model_skins(&model, &classes);
+    let mut skins = model_skins(&model, &classes);
+    // Low-res LOD meshes frequently omit the `override_texture*` segment group
+    // tag even when they bind the same base texture as the high-res mesh.
+    // Inherit any matching group from the high model so `OverrideTexture`
+    // classes keep their skin at LOD distance.
+    let low_textures: std::collections::BTreeSet<String> = low
+        .segments
+        .iter()
+        .map(|s| s.texture.to_ascii_lowercase())
+        .collect();
+    let high_skins = model_skins(high, &classes);
+    for (group, textures) in high_skins.groups {
+        for tex in textures {
+            let already_grouped = skins.groups.values().any(|list| list.contains(&tex));
+            if low_textures.contains(&tex) && !already_grouped {
+                skins.groups.entry(group.clone()).or_default().push(tex);
+            }
+        }
+    }
     crate::write_ron(
         &out.join("soldiers").join(format!("{companion}.skins.ron")),
         &manifest::SoldierSkins {

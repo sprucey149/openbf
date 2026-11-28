@@ -570,3 +570,34 @@ fn a_recorded_mouse_pick_replays_to_the_same_hash() {
     let idle = ron::to_string(&PadState::default()).unwrap();
     assert!(!idle.contains("pick"), "{idle}");
 }
+
+#[test]
+fn scripted_battle_with_single_post_skips_spawn_map() {
+    let mut s = Sim::empty(7);
+    s.heightfield = Some(flat_ground());
+    s.add_weapon_class(WeaponClass::bf2_rifle());
+    s.classes[0] = vec![class_w(1, None, 0)];
+    s.classes[1] = vec![class_w(1, None, 0)];
+    s.battle.campaign_rules = true;
+    s.add_cp(sphere_cp("cp_only", Vec3::ZERO, 8.0, true), Some(0));
+    s.spawn(&UnitSpec::player_in_slot(0, 0, Vec3::new(0.0, 0.0, 5.0)))
+        .unwrap();
+    assert!(s.open_spawn_screens(0, false));
+    assert_eq!(
+        s.spawn_stage[0],
+        SpawnStage::Class,
+        "single post under scripted rules goes straight to class selection"
+    );
+    assert_eq!(s.spawn_post_selected(0), Some(SpawnPost::Post(0)));
+    tap(&mut s, buttons::SPAWN_BACK);
+    assert_eq!(
+        s.spawn_stage[0],
+        SpawnStage::Class,
+        "Back stays on class screen when only one post exists"
+    );
+    assert!(
+        tap(&mut s, buttons::SPAWN_ACCEPT),
+        "single accept spawns immediately"
+    );
+    assert_eq!(s.spawn_stage[0], SpawnStage::Accepted);
+}

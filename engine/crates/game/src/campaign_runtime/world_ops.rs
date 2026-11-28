@@ -113,9 +113,6 @@ impl World {
             .filter(|(_, u)| u.team == t)
             .map(|(k, _)| k as u32)
             .collect();
-        if t < 2 {
-            return slots.get(i).copied();
-        }
         let size = self.team_size(t) as usize;
         if !self.native_members.contains_key(&t) {
             let mut members: Vec<u32> = slots
@@ -224,6 +221,14 @@ impl World {
             );
             if let Some(h) = sim.spawn(&spec) {
                 self.char_alias.insert(c, h.index);
+            }
+            return;
+        }
+        if team < 2 {
+            if let Some(h) = sim.spawn_scripted_ai(team, pos.0, pos.1) {
+                if h.index != c {
+                    self.char_alias.insert(c, h.index);
+                }
             }
             return;
         }

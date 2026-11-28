@@ -397,11 +397,16 @@ impl CampaignRuntime {
             let n = reinforcement_count(sim, t);
             if n != self.w.tickets_seen[t] {
                 self.w.tickets_seen[t] = n;
-                fired.push((
-                    EventKind::TicketCountChange,
-                    EventKey::default(),
-                    vec![Value::Num(t as f32 + 1.0), Value::Num(n as f32)],
-                ));
+                // Unlimited reinforcements (`SetReinforcementCount(t, -1)`)
+                // disables ticket-depletion callbacks; stock `Objective.lua`
+                // treats any `count <= 0` callback as `MissionDefeat`.
+                if n >= 0 {
+                    fired.push((
+                        EventKind::TicketCountChange,
+                        EventKey::default(),
+                        vec![Value::Num(t as f32 + 1.0), Value::Num(n as f32)],
+                    ));
+                }
             }
             if self.w.team_points[t] != self.w.points_seen[t] {
                 self.w.points_seen[t] = self.w.team_points[t];

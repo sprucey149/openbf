@@ -375,3 +375,211 @@ mod spa;
 mod startup;
 #[path = "tests/tutorial_geo.rs"]
 mod tutorial_geo;
+
+fn synthetic_runtime(script: manifest::script_ir::ScriptDef) -> (WalkSim, CampaignRuntime) {
+    let mut walk = WalkSim::new(1, Vec3::ZERO, None);
+    let u = &walk.sim.units[walk.player.index as usize];
+    let uc = core::unit::UnitClass {
+        consts: u.spec.consts,
+        max_health: u.health.max,
+        health_type: u.spec.health_type,
+        weapon_class: u.weapon_class,
+        total_clips: 6,
+        weapon_slot: u.weapon_slot,
+        slots: u.spec.slots.clone(),
+        jet: false,
+        capture_posts: true,
+        drops: Default::default(),
+        chunk: None,
+        droideka: None,
+        min: 1,
+        max: None,
+        unlock_points: 0,
+    };
+    walk.sim.classes[0] = vec![uc.clone()];
+    walk.sim.classes[1] = vec![uc];
+    walk.sim.class_enabled[0] = vec![true];
+    walk.sim.class_enabled[1] = vec![true];
+    walk.sim.battle.script_rules = true;
+    let mut layout = crate::layout::MapLayout::default();
+    layout.paths.push(crate::layout::SpawnPath {
+        name: "spawn_path".into(),
+        nodes: vec![crate::layout::SpawnNode {
+            pos: Vec3::new(10.0, 0.0, 0.0),
+            yaw: 0.0,
+        }],
+    });
+    let manifest: manifest::Manifest = ron::from_str(
+        r#"(
+            map: "t", source_game: "bf2",
+            terrain_name: None, sky_name: None, terrain_glb: None,
+            models: [], textures: [], classes: [], geometries: [],
+            regions: [], instances: [],
+        )"#,
+    )
+    .expect("empty manifest");
+    let mut spec = crate::mission::CampaignMissionDef::default();
+    spec.script = Some(script);
+    let mut rt = CampaignRuntime::new(
+        spec,
+        &layout,
+        &manifest,
+        &[],
+        Vec::new(),
+        &walk.sim,
+    );
+    rt.set_is_campaign(false);
+    rt.set_team_rosters([vec!["hero".into()], vec!["trooper".into()]], [1, 20]);
+    rt.start(&mut walk.sim);
+    (walk, rt)
+}
+
+#[test]
+fn unlimited_reinforcements_never_fires_ticket_count_change_defeat() {
+    use manifest::script_ir::{BinOp, Expr, FnDef, ScriptDef, Stmt};
+    // Mirrors stock Objective.lua + custom mode SetReinforcementCount(t, -1).
+    let script = ScriptDef {
+        main: 0,
+        fns: vec![
+            FnDef {
+                name: "main".into(),
+                params: 0,
+                vararg: false,
+                locals: 1,
+                body: vec![
+                    Stmt::SetGlobal("ScriptPostLoad".into(), Expr::Closure(1, vec![])),
+                    Stmt::Return(vec![]),
+                ],
+            },
+            FnDef {
+                name: "ScriptPostLoad".into(),
+                params: 0,
+                vararg: false,
+                locals: 1,
+                body: vec![
+                    Stmt::Do(Expr::Call(
+                        Box::new(Expr::Global("OnTicketCountChange".into())),
+                        vec![Expr::Closure(2, vec![])],
+                    )),
+                    Stmt::Do(Expr::Call(
+                        Box::new(Expr::Global("SetReinforcementCount".into())),
+                        vec![Expr::Num(1.0), Expr::Num(-1.0)],
+                    )),
+                    Stmt::Do(Expr::Call(
+                        Box::new(Expr::Global("SetReinforcementCount".into())),
+                        vec![Expr::Num(2.0), Expr::Num(-1.0)],
+                    )),
+                    Stmt::Return(vec![]),
+                ],
+            },
+            FnDef {
+                name: "on_ticket".into(),
+                params: 2,
+                vararg: false,
+                locals: 2,
+                body: vec![
+                    Stmt::If(
+                        Expr::Bin(
+                            BinOp::Le,
+                            Box::new(Expr::Local(1)),
+                            Box::new(Expr::Num(0.0)),
+                        ),
+                        vec![Stmt::Do(Expr::Call(
+                            Box::new(Expr::Global("MissionDefeat".into())),
+                            vec![Expr::Local(0)],
+                        ))],
+                        vec![],
+                    ),
+                    Stmt::Return(vec![]),
+                ],
+            },
+        ],
+    };
+    let (mut walk, mut rt) = synthetic_runtime(script);
+    let tc = [vec!["hero".into()], vec!["trooper".into()]];
+    rt.step(
+        &mut walk.sim,
+        walk.player,
+        None,
+        &tc,
+        &BTreeMap::new(),
+        &[],
+        core::TICK_DT,
+    );
+    assert_eq!(
+        walk.sim.outcome, None,
+        "SetReinforcementCount(t, -1) must not trigger OnTicketCountChange defeat"
+    );
+}
+
+#[test]
+fn set_game_rules_campaign_disables_side_select_and_ambush_spawns_main_team() {
+    use manifest::script_ir::{Expr, FnDef, ScriptDef, Stmt};
+    let script = ScriptDef {
+        main: 0,
+        fns: vec![
+            FnDef {
+                name: "main".into(),
+                params: 0,
+                vararg: false,
+                locals: 1,
+                body: vec![
+                    Stmt::SetGlobal("ScriptPostLoad".into(), Expr::Closure(1, vec![])),
+                    Stmt::Return(vec![]),
+                ],
+            },
+            FnDef {
+                name: "ScriptPostLoad".into(),
+                params: 0,
+                vararg: false,
+                locals: 3,
+                body: vec![
+                    Stmt::Do(Expr::Call(
+                        Box::new(Expr::Global("ScriptCB_SetGameRules".into())),
+                        vec![Expr::Str("campaign".into())],
+                    )),
+                    Stmt::Do(Expr::Call(
+                        Box::new(Expr::Global("SetReinforcementCount".into())),
+                        vec![Expr::Num(2.0), Expr::Num(0.0)],
+                    )),
+                    Stmt::Do(Expr::Call(
+                        Box::new(Expr::Global("SetFlagGameplayType".into())),
+                        vec![Expr::Str("1flag".into())],
+                    )),
+                    Stmt::SetLocal(
+                        0,
+                        Expr::Call(
+                            Box::new(Expr::Global("GetTeamMember".into())),
+                            vec![Expr::Num(2.0), Expr::Num(0.0)],
+                        ),
+                    ),
+                    Stmt::Do(Expr::Call(
+                        Box::new(Expr::Global("SpawnCharacter".into())),
+                        vec![
+                            Expr::Local(0),
+                            Expr::Call(
+                                Box::new(Expr::Global("GetPathPoint".into())),
+                                vec![Expr::Str("spawn_path".into()), Expr::Num(0.0)],
+                            ),
+                        ],
+                    )),
+                    Stmt::Return(vec![]),
+                ],
+            },
+        ],
+    };
+    let (walk, rt) = synthetic_runtime(script);
+    assert_eq!(rt.can_switch_sides(), Some(false));
+    assert!(rt.flag_ctf_hud());
+    assert!(walk.sim.battle.campaign_rules);
+    let team2_alive = walk
+        .sim
+        .units
+        .iter()
+        .filter(|u| u.alive && u.team == 1)
+        .count();
+    assert_eq!(
+        team2_alive, 1,
+        "GetTeamMember + SpawnCharacter must spawn team 2 bots even with no CPs"
+    );
+}

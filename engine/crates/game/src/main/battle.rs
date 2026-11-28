@@ -293,7 +293,11 @@ fn team_templates(
 /// screens stand over the mission's camera shots until the first spawn (card SSELB,
 /// `game::spawn_backdrop`).
 pub(super) fn open_spawn_screens(walk: &mut WalkSim, mission: Option<&game::mission::MissionDef>) {
-    let side_choice = mission.map_or(true, |m| m.allows_side_select());
+    let side_choice = walk
+        .campaign
+        .as_ref()
+        .and_then(|c| c.can_switch_sides())
+        .unwrap_or_else(|| mission.map_or(true, |m| m.allows_side_select()));
     if !walk.sim.open_spawn_screens(0, side_choice) {
         eprintln!("spawn screens: slot 0 holds no live unit; the respawn stays automatic");
         return;
@@ -313,7 +317,11 @@ pub(super) fn seat_local_players(
     players: usize,
     mission: Option<&game::mission::MissionDef>,
 ) {
-    let side_choice = mission.map_or(true, |m| m.allows_side_select());
+    let side_choice = walk
+        .campaign
+        .as_ref()
+        .and_then(|c| c.can_switch_sides())
+        .unwrap_or_else(|| mission.map_or(true, |m| m.allows_side_select()));
     for slot in 1..players.min(4) as u8 {
         if let Err(e) = walk.add_local_player(slot, None) {
             eprintln!("splitscreen: player slot {slot} could not be seated: {e:?}");
@@ -1553,12 +1561,16 @@ pub(super) fn hud_model_for_view(
                         .map(|(points, limits)| (points.map(|p| p as i32), limits))
                 }),
         },
-        ctf: walk.sim.ctf.is_some() && walk.campaign.is_none(),
+        ctf: (walk.sim.ctf.is_some() && walk.campaign.is_none())
+            || walk.campaign.as_ref().is_some_and(|c| c.flag_ctf_hud()),
         flag_status: walk
             .sim
             .ctf
             .as_ref()
-            .filter(|_| walk.campaign.is_none())
+            .filter(|_| {
+                walk.campaign.is_none()
+                    || walk.campaign.as_ref().is_some_and(|c| c.flag_ctf_hud())
+            })
             .and_then(|c| {
                 if c.mode == core::sim::CtfMode::OneFlag {
                     c.flags.first().and_then(|flag| match flag.status {
@@ -1619,14 +1631,11 @@ pub(super) fn hud_model_for_view(
             .domination_left()
             .map(|(holder, secs)| (holder == me.team, secs)),
         round_end: walk.round_end.as_ref().map(round_end_model),
-        // Only the round's own time limit draws a countdown. The campaign's
-        // `ShowTimer` objectives have no HUD timer in the original - the egui
-        // panel was a port addition that rendered badly over the battle - so
-        // mission timers stay off the HUD.
         time_left: walk.sim.time_limit.map(|l| {
             (u64::from(l) * u64::from(core::TICK_HZ)).saturating_sub(walk.sim.tick) as f32
                 / core::TICK_HZ as f32
         }),
+        objective_timer: walk.campaign.as_ref().and_then(|c| c.time_left()),
         messages: feed.take(),
         ambush: feed.take_ambush(),
         damage_flash: feed.damage_flash(walk.sim.tick, walk.player),

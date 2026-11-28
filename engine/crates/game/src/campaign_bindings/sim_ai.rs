@@ -104,7 +104,29 @@ impl Ctx<'_> {
                     .and_then(|t| w.team_classes.get(usize::from(t)).map(Vec::len))
                     .unwrap_or(0) as f32,
             )),
-            "ForceHumansOntoTeam1" => nothing(),
+            "ForceHumansOntoTeam1" => {
+                w.can_switch_sides = Some(false);
+                nothing()
+            }
+            "ScriptCB_SetCanSwitchSides" => {
+                w.can_switch_sides = Some(arg(a, 0).truthy());
+                nothing()
+            }
+            "ScriptCB_SetGameRules" => {
+                if let Some(rules) = arg(a, 0).as_str() {
+                    if rules.eq_ignore_ascii_case("campaign")
+                        || rules.eq_ignore_ascii_case("metagame")
+                    {
+                        w.can_switch_sides = Some(false);
+                        sim.battle.campaign_rules = true;
+                    } else if rules.eq_ignore_ascii_case("instantaction")
+                        || rules.eq_ignore_ascii_case("mp")
+                    {
+                        w.can_switch_sides = Some(true);
+                    }
+                }
+                nothing()
+            }
             "ScriptCB_PlayerSuicide" => {
                 if let Some(u) = sim.unit_mut(w.player) {
                     if u.alive {

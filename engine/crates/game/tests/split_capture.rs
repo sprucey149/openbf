@@ -888,6 +888,7 @@ fn split_name_tags_capture() {
     };
     let timed = || HudModel {
         time_left: Some(754.0),
+        objective_timer: None,
         ..battle(None)
     };
     let xbox = pad(IconSet::XboxOne);
@@ -1184,6 +1185,7 @@ fn split_lan_name_tags_capture() {
     );
     let timed = || HudModel {
         time_left: Some(754.0),
+        objective_timer: None,
         ..battle(None)
     };
     let models: Vec<Option<HudModel>> = drawn

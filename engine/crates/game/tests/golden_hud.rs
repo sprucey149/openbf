@@ -69,6 +69,7 @@ fn model() -> ui::hud::HudModel {
         countdown: None,
         round_end: None,
         time_left: None,
+        objective_timer: None,
         messages: Vec::new(),
         stats: Some(ui::hud::HudStats::default()),
         player_team: 0,

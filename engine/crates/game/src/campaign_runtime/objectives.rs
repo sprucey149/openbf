@@ -71,6 +71,15 @@ impl CampaignRuntime {
         (self.w.show_points[0] || self.w.show_points[1]).then_some(self.w.team_points)
     }
 
+    /// True when the script enabled CTF flag HUD rules via
+    /// `SetFlagGameplayType("1flag" | "2flag")`.
+    pub fn flag_ctf_hud(&self) -> bool {
+        matches!(
+            self.w.flag_gameplay.as_deref(),
+            Some("1flag" | "2flag")
+        )
+    }
+
     pub fn command_posts_hidden(&self) -> bool {
         self.w.hide_cps
     }
