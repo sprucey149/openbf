@@ -218,6 +218,13 @@ pub const NEED_GUNNER_CHANCE: f32 = 0.3;
 /// other difficulties.
 pub const GRENADE_WARN_DELAY: (f32, f32) = (0.6, 1.3);
 
+/// [`Sim::team_rows_cache`]: the humans per team and the rows they give.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TeamRowsCache {
+    humans: [u8; 2],
+    rows: [crate::skill::TeamSkill; 2],
+}
+
 #[derive(Clone)]
 pub struct Sim {
     pub tick: u64,
@@ -732,6 +739,13 @@ pub struct Sim {
     /// ([`super::think_pool`]; 1 = the serial pass). How fast, never what:
     /// every count gives the same tick, so it is not hashed.
     pub think_threads: usize,
+    /// The DTEAM humans and rows ([`Sim::humans_per_team`],
+    /// [`Sim::team_rows`]) held while a read-only pass runs
+    /// ([`Sim::with_team_rows_cached`]): set just before the pass, cleared
+    /// right after. The pass reads a `&Sim` nothing can write, so the held
+    /// values are the fresh ones (debug builds check every read). A cache
+    /// of derived values: not hashed, never set between passes.
+    pub(crate) team_rows_cache: Option<TeamRowsCache>,
     /// Phase B: the two teams' objective plans (`core::commander`). SIM STATE
     /// — hashed, replay-exact, re-made one team per tick.
     pub commander: [crate::commander::TeamPlan; 2],
@@ -1098,6 +1112,15 @@ impl Sim {
     /// team; a vacated slot, a human who left, counts no more), plus
     /// [`Sim::extra_humans`].
     pub fn humans_per_team(&self) -> [u8; 2] {
+        if let Some(c) = &self.team_rows_cache {
+            debug_assert_eq!(c.humans, self.humans_per_team_fresh());
+            return c.humans;
+        }
+        self.humans_per_team_fresh()
+    }
+
+    /// [`Sim::humans_per_team`] counted now (a scan of every unit).
+    fn humans_per_team_fresh(&self) -> [u8; 2] {
         let mut n = self.extra_humans;
         for h in self.players.iter().flatten() {
             if let Some(u) = self.units.get(h.index as usize).filter(|u| u.team < 2) {
@@ -1120,7 +1143,32 @@ impl Sim {
     /// stored, so a human joining, leaving or changing team is in the next
     /// read; the skill reaches a bot at its next spawn ([`Sim::bot_skill`]).
     pub fn team_rows(&self) -> [crate::skill::TeamSkill; 2] {
-        let humans = self.humans_per_team();
+        if let Some(c) = &self.team_rows_cache {
+            debug_assert_eq!(c.rows, self.team_rows_from(self.humans_per_team_fresh()));
+            return c.rows;
+        }
+        self.team_rows_from(self.humans_per_team_fresh())
+    }
+
+    /// Run the read-only pass `pass` with [`Sim::team_rows_cache`] held,
+    /// so its many [`Sim::team_rows`] and [`Sim::humans_per_team`] reads
+    /// (through `difficulty_of`, `ai_tier`, `skill_of`, `may_focus`) skip
+    /// the unit scan. `pass` gets `&Sim`, so nothing can change what the
+    /// cache holds; it is cleared when `pass` returns. The same answers as
+    /// without it, so the tick is unchanged.
+    pub(crate) fn with_team_rows_cached<R>(&mut self, pass: impl FnOnce(&Self) -> R) -> R {
+        let humans = self.humans_per_team_fresh();
+        self.team_rows_cache = Some(TeamRowsCache {
+            humans,
+            rows: self.team_rows_from(humans),
+        });
+        let out = pass(self);
+        self.team_rows_cache = None;
+        out
+    }
+
+    /// [`Sim::team_rows`] for the humans `humans`.
+    fn team_rows_from(&self, humans: [u8; 2]) -> [crate::skill::TeamSkill; 2] {
         // Issue #171: a space round keeps the 2026-11-03 rule (option A is
         // measured on the ground only, `skill::team_skill_space`).
         if self.space_round() {
@@ -1355,6 +1403,7 @@ impl Sim {
             bot_census: Default::default(),
             think_hist: Default::default(),
             think_threads: super::think_pool::default_think_threads(),
+            team_rows_cache: None,
             commander: [
                 crate::commander::TeamPlan::new(0),
                 crate::commander::TeamPlan::new(1),

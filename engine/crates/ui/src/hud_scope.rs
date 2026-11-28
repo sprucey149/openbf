@@ -106,20 +106,7 @@ impl Ctx<'_> {
             scale: [1.0, 1.0],
         };
         for rect in bars_in(f) {
-            self.quad(
-                usize::MAX,
-                &Mat4::IDENTITY,
-                &s,
-                &Quad {
-                    rect,
-                    uv: [0.0, 0.0, 1.0, 1.0],
-                    color: [0.0, 0.0, 0.0, 1.0],
-                    texture: "white",
-                    additive: false,
-                    shadow: false,
-                    boxed: false,
-                },
-            );
+            self.fill(usize::MAX, &s, rect, [0.0, 0.0, 0.0, 1.0]);
         }
         for (rect, uv) in quads_in(f) {
             self.quad(

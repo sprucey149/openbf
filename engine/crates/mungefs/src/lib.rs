@@ -136,10 +136,9 @@ impl<'a> Chunk<'a> {
     }
 }
 
-/// Little-endian scalar reads at a byte offset into a chunk payload — the one
-/// implementation of the `from_le_bytes(b[o..o + N])` line every parser in
-/// this crate used to spell for itself. Each panics on a short payload, which
-/// is why every caller length-checks the payload first (`if p.len() < N`).
+/// Little-endian scalar reads at a byte offset into a chunk payload, shared by
+/// every parser in this crate. Each panics on a short payload, so callers
+/// length-check the payload first (`if p.len() < N`).
 pub(crate) mod le {
     pub fn u16_at(b: &[u8], at: usize) -> u16 {
         u16::from_le_bytes([b[at], b[at + 1]])

@@ -201,6 +201,10 @@ pub struct FrameRow {
     /// What the frame's sim ticks cost.
     #[serde(default)]
     pub cost: TickCosts,
+    /// The fraction of the window the world drew at (`render::world_scale`,
+    /// automatic quality's scale); 0 in a record from before it was kept.
+    #[serde(default)]
+    pub world_scale: f32,
 }
 
 impl FrameRow {
@@ -235,6 +239,9 @@ impl FrameRow {
         );
         if self.gpu_ms > 0.0 {
             s += &format!("  gpu {:.1}", self.gpu_ms);
+        }
+        if self.world_scale > 0.0 && self.world_scale < 1.0 {
+            s += &format!("  scale {:.2}", self.world_scale);
         }
         if self.files > 0 {
             s += &format!("  files {} ({} kB)", self.files, self.file_bytes / 1024);
@@ -530,6 +537,29 @@ fn schedstat() -> (u64, u64) {
     (it.next().unwrap_or(0), it.next().unwrap_or(0))
 }
 
+/// The calling thread's CPU time so far in ms (`CLOCK_THREAD_CPUTIME_ID`,
+/// scheduler waits excluded); `None` off Linux, where a caller keeps its
+/// wall time rather than call it CPU.
+#[cfg(target_os = "linux")]
+pub fn thread_cpu_ms() -> Option<f64> {
+    #[repr(C)]
+    struct Timespec {
+        sec: std::ffi::c_long,
+        ns: std::ffi::c_long,
+    }
+    unsafe extern "C" {
+        fn clock_gettime(clock: std::ffi::c_int, time: *mut Timespec) -> std::ffi::c_int;
+    }
+    let mut t = Timespec { sec: 0, ns: 0 };
+    // SAFETY: a writable ABI-compatible timespec; Linux clock id 3 is thread CPU.
+    (unsafe { clock_gettime(3, &mut t) } == 0).then_some(t.sec as f64 * 1000.0 + t.ns as f64 / 1e6)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn thread_cpu_ms() -> Option<f64> {
+    None
+}
+
 fn locked(r: &Mutex<Record>) -> std::sync::MutexGuard<'_, Record> {
     r.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -742,6 +772,7 @@ impl FrameProfile {
                 files: (now.0 - self.reads.0) as u32,
                 file_bytes: now.1 - self.reads.1,
                 cost: std::mem::take(&mut self.cost),
+                world_scale: r.world_scale(),
             };
             self.pending = Some((self.start, row));
         }

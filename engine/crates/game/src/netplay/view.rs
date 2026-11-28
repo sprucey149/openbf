@@ -92,17 +92,6 @@ impl LocalView {
         &self.look_pads
     }
 
-    /// The look pads of the local player on `slot` (`WalkSim::local_slot_of`;
-    /// the first player's are [`LocalView::look_pads`]); none for a slot the
-    /// peer does not hold.
-    pub fn look_pads_of_slot(&self, slot: u8) -> &[PadState] {
-        match self.predictor.index_of_slot(slot) {
-            Some(0) => &self.look_pads,
-            Some(i) => self.extra_look.get(i - 1).map_or(&[], |(p, _)| p),
-            None => &[],
-        }
-    }
-
     /// One frame (module header). `each(walk, bundle, feed, muted)` runs
     /// after every stepped tick. `dt` is the frame's whole wall time (sim
     /// first, [`Peer::frame`]); the prediction's easing and budget take at

@@ -30,10 +30,10 @@ translations, font artwork or media.
   Bink. Four segments cannot reproduce the PS2's 34 by changing a number. The
   actual menu selects only a subset: `shell_main` and `shell_sub_left`.
 - **Shell backdrop:** PS2 and Xbox `SHELL.LVL` have `iface_instant_action`; PC does
-  not, and `bake_shell` stops on a missing `SHELL_TEXTURES` name. PR #94's substitute
+  not, and `bake_shell_with_campaign` stops on a missing `SHELL_TEXTURES` name. PR #94's substitute
   did not survive the merge, because the shell now comes from a console disc. All
   seven names exist on Xbox, which also adds `iface_instant_action_wide`. The two PS2 DNAS logos are absent from Xbox/PC
-  `SHELL.LVL`, but `bake_shell` does not request them. PC also localizes the Dolby
+  `SHELL.LVL`, but `bake_shell_with_campaign` does not request them. PC also localizes the Dolby
   logo name. Those logo differences are not gameplay dependencies.
 - **HUD layouts:** BF2 `INGAME.LVL` contains five `hud_` chunks on **each** of
   PS2, Xbox and PC. Presence is measured; equivalence of all records is **NM**.

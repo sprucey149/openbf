@@ -741,18 +741,6 @@ fn bake_movie_group(
     Ok(out)
 }
 
-/// Bake the shell into `<out>/shell/`, including menu movies, campaign
-/// transitions and (when present) campaign cutscenes from `INSHELL.LVL` + `INGAME.MVS`.
-pub fn bake_shell(
-    shell_lvl: &str,
-    mvs_path: &str,
-    sound_lvl: &str,
-    core_lvl: &str,
-    out: &str,
-) -> Result<ShellIndex> {
-    bake_shell_with_campaign(shell_lvl, mvs_path, sound_lvl, core_lvl, out, None, None)
-}
-
 /// Bake the shell into `<out>/shell/` with an explicit optional `INSHELL.LVL` and
 /// the movie files or disc images that hold the Rise of the Empire campaign
 /// cutscenes ([`campaign_movie_files`]).

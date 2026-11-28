@@ -338,19 +338,11 @@ impl Ctx<'_> {
             origin: [0.0, 0.0],
             scale: [1.0, 1.0],
         };
-        self.quad(
+        self.fill(
             NONE,
-            &Mat4::IDENTITY,
             &s,
-            &Quad {
-                rect: [0.0, 0.0, size[0], size[1]],
-                uv: [0.0, 0.0, 1.0, 1.0],
-                color: [0.0, 0.0, 0.0, 1.0 - crate::spawn::BACKDROP_DIM],
-                texture: "white",
-                additive: false,
-                shadow: false,
-                boxed: false,
-            },
+            [0.0, 0.0, size[0], size[1]],
+            [0.0, 0.0, 0.0, 1.0 - crate::spawn::BACKDROP_DIM],
         );
     }
 

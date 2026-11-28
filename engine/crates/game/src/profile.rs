@@ -469,15 +469,6 @@ impl CampaignProgress {
         self.unlocked = self.unlocked.max(next).clamp(1, Self::MISSIONS as u8);
     }
 
-    /// The saves' names as the list shows them: `current` first, then the
-    /// newest (FUN_00189ec8).
-    pub fn save_names(&self, current: Option<&str>) -> Vec<String> {
-        self.save_list(current)
-            .into_iter()
-            .map(|s| s.name.clone())
-            .collect()
-    }
-
     /// The saves in the list's order: `current` first, then the newest.
     pub fn save_list(&self, current: Option<&str>) -> Vec<&CampaignSave> {
         let mut order: Vec<&CampaignSave> = self.saves.iter().collect();

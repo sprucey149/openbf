@@ -560,6 +560,8 @@ impl Sim {
     }
 
     fn step_with(&mut self, pads: &[PadState], predicted: bool) {
+        // A pass that panicked never cleared its held rows.
+        self.team_rows_cache = None;
         let dt = TICK_DT;
         // The rays since the last step were not the sim's (the chase camera's).
         crate::collision::cost::take();
@@ -742,23 +744,26 @@ impl Sim {
                 })
                 .collect();
             let threads = super::think_pool::threads_for(self.think_threads, jobs.len());
-            let sim: &Self = self;
-            let thought = super::think_pool::run(&jobs, threads, |&i| {
-                let u = &sim.units[i];
-                let mut st = u.ai;
-                let think_t0 = std::time::Instant::now();
-                let queries_before = crate::collision::cost::queries();
-                let (p, mut nt) = ai::think(sim, sim.handle(i), &mut st);
-                let elapsed = think_t0.elapsed();
-                // Bot census: the call's wall time (a measurement of the
-                // machine, read only by `think_hist` below).
-                nt.think_ns = u32::try_from(elapsed.as_nanos()).unwrap_or(u32::MAX);
-                let cost = crate::sim::UnitCost {
-                    unit: i as u32,
-                    ms: elapsed.as_secs_f32() * 1000.0,
-                    ray_queries: crate::collision::cost::queries() - queries_before,
-                };
-                ((i, u.gen, u.mount, st, p, nt), cost)
+            // The thinks read the DTEAM rows about a thousand times a tick
+            // on a large map; held for the pass (`with_team_rows_cached`).
+            let thought = self.with_team_rows_cached(|sim| {
+                super::think_pool::run(&jobs, threads, |&i| {
+                    let u = &sim.units[i];
+                    let mut st = u.ai;
+                    let think_t0 = std::time::Instant::now();
+                    let queries_before = crate::collision::cost::queries();
+                    let (p, mut nt) = ai::think(sim, sim.handle(i), &mut st);
+                    let elapsed = think_t0.elapsed();
+                    // Bot census: the call's wall time (a measurement of the
+                    // machine, read only by `think_hist` below).
+                    nt.think_ns = u32::try_from(elapsed.as_nanos()).unwrap_or(u32::MAX);
+                    let cost = crate::sim::UnitCost {
+                        unit: i as u32,
+                        ms: elapsed.as_secs_f32() * 1000.0,
+                        ray_queries: crate::collision::cost::queries() - queries_before,
+                    };
+                    ((i, u.gen, u.mount, st, p, nt), cost)
+                })
             });
             for (update, cost) in thought {
                 if worst_think.is_none_or(|w| cost.ms > w.ms) {
@@ -766,18 +771,7 @@ impl Sim {
                 }
                 ai_updates.push(update);
             }
-            #[cfg(feature = "brain-shadow")]
-            let live_ai_elapsed = ai_t0.map(|t| t.elapsed()).unwrap_or_default();
-            #[cfg(feature = "brain-shadow")]
-            crate::collision::cost::preserve(|| {
-                crate::ai::think_memo::during_thinks(|| {
-                    for (i, _, _, st, pad, nt) in &ai_updates {
-                        ai::verify_shadow(self, *i, st, *pad, *nt);
-                    }
-                });
-            });
             self.unit_grid.clear();
-            #[cfg(not(feature = "brain-shadow"))]
             let live_ai_elapsed = ai_t0.map(|t| t.elapsed()).unwrap_or_default();
             self.ai_wall_ms = live_ai_elapsed.as_secs_f32() * 1000.0;
             self.tick_cost.worst_think = worst_think;

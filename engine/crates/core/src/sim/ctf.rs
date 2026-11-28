@@ -165,10 +165,6 @@ impl Flag {
         }
     }
 
-    pub fn is_at_home(&self) -> bool {
-        matches!(self.status, FlagStatus::AtHome)
-    }
-
     pub fn carrier(&self) -> Option<UnitHandle> {
         match self.status {
             FlagStatus::Carried { carrier } => Some(carrier),

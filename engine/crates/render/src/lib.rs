@@ -352,12 +352,22 @@ pub struct Renderer {
     /// adapter has timestamp queries (`gpu_timer.rs`); read by
     /// [`Renderer::gpu_sections`].
     gpu_timer: Option<gpu_timer::GpuTimer>,
+    /// Measurement only: time every split view of a present, not just the first. Set by the
+    /// bench (`--bench-views`) and by the window under `OPENBF_GPU_TIMING=1`; it does nothing
+    /// without the GPU timer. [`Renderer::gpu_sections`] then sums a whole present's views and
+    /// [`Renderer::gpu_view_sections`] is the newest single view.
+    pub time_every_view: bool,
     /// The window's frame between the views of one present (`render_view`): acquired by the
     /// first view, presented by the last (issue #194).
     held_frame: Option<(wgpu::SurfaceTexture, wgpu::TextureView)>,
-    /// CPU ms the last `render_frame` waited to acquire the window's frame
-    /// (the vsync / frame-latency wait); 0 headless.
+    /// CPU ms the last present waited to acquire the window's frame (the vsync /
+    /// frame-latency wait), measured by its first view only; 0 headless.
     acquire_ms: f64,
+    /// Tests only: a wait added to each present's acquire, as a window's vsync would (the
+    /// headless tests of [`Renderer::acquire_ms`]; the `test-support` feature only).
+    #[doc(hidden)]
+    #[cfg(feature = "test-support")]
+    pub acquire_delay: Option<std::time::Duration>,
     /// Frustum culling on/off. On by default; `--no-cull` in the bench turns
     /// it off so the two can be compared on the same scene.
     pub cull: bool,

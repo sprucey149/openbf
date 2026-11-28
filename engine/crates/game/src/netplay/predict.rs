@@ -285,6 +285,7 @@ impl ShotLedger {
     }
 
     /// Shot numbers fed back and not yet confirmed.
+    #[cfg(test)]
     pub fn outstanding(&self) -> usize {
         self.played.len()
     }

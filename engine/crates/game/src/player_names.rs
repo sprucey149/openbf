@@ -40,9 +40,7 @@ impl PlayerNames {
     /// Forget every name, for a new battle. The generation still moves on, so a reader that
     /// copied the old table copies again.
     pub fn clear(&mut self) {
-        if !self.by_slot.is_empty() {
-            self.by_slot.clear();
-        }
+        self.by_slot.clear();
         self.generation += 1;
     }
 

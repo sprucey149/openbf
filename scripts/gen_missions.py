@@ -2732,31 +2732,6 @@ def _ron_mut(mut):
     raise ValueError("unknown CampaignMutation %r" % (mut,))
 
 
-def _ron_stage_kind(kind):
-    k = kind[0]
-    if k == "Conquest":
-        return "Conquest(posts: [%s])" % ", ".join(_ron_str(p) for p in kind[1])
-    if k == "Assault":
-        t = ", ".join(_ron_str(x) for x in kind[1])
-        tt = ", ".join("(%s, %d)" % (_ron_str(cls), lim) for cls, lim in kind[2])
-        return "Assault(targets: [%s], target_types: [%s])" % (t, tt)
-    if k == "Ctf":
-        return "Ctf(flag: %s, home_region: %s, capture_region: %s, capture_limit: %d)" % (
-            _ron_str(kind[1]), _ron_str(kind[2]), _ron_str(kind[3]), kind[4]
-        )
-    if k == "Goto":
-        return "Goto(region: %s)" % _ron_str(kind[1])
-    if k == "Tdm":
-        return "Tdm(kills: %d)" % kind[1]
-    if k == "Defend":
-        return "Defend(seconds: %s)" % fmtf(float(f32_text(kind[1])))
-    if k == "Interact":
-        return "Interact(hint: %s, region: %s, target: %s, class_filter: %s)" % (
-            _ron_str(kind[1]), _ron_opt_str(kind[2]), _ron_opt_str(kind[3]), _ron_opt_str(kind[4])
-        )
-    raise ValueError("unknown CampaignObjectiveKind %r" % (kind,))
-
-
 def ron(m):
     pretty = PRETTY.get(m.key, m.key)
     mode = "hunt" if m.hunt is not None else mission_mode(m.ps2)

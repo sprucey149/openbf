@@ -32,6 +32,9 @@ pub(crate) struct WorldScale {
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     targets: Vec<WorldTarget>,
+    /// The split views' second colour target per size, sharing the first's depth
+    /// ([`WorldScale::bloom_out`]).
+    outs: Vec<WorldTarget>,
 }
 
 impl WorldScale {
@@ -80,6 +83,7 @@ impl WorldScale {
             layout,
             sampler,
             targets: Vec::new(),
+            outs: Vec::new(),
         }
     }
 
@@ -98,11 +102,40 @@ impl WorldScale {
         target
     }
 
+    /// [ours] A split view's bloom composite target: a second colour target of `world`'s size
+    /// that shares its depth. The composite reads `world` and writes this one, so the frame is
+    /// not copied first (`Renderer::bloom_pass`); the passes after the bloom draw here and the
+    /// upscale reads it.
+    pub fn bloom_out(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        world: &WorldTarget,
+    ) -> WorldTarget {
+        if let Some(t) = self.outs.iter().find(|t| t.size == world.size) {
+            return t.clone();
+        }
+        let target = self.target_with_depth(device, format, world.size, world.depth.clone());
+        self.outs.push(target.clone());
+        target
+    }
+
     pub(super) fn make_target(
         &self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         size: [u32; 2],
+    ) -> WorldTarget {
+        let depth = crate::device::create_depth_texture(device, size[0], size[1]);
+        self.target_with_depth(device, format, size, depth)
+    }
+
+    fn target_with_depth(
+        &self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        size: [u32; 2],
+        depth: wgpu::TextureView,
     ) -> WorldTarget {
         let texture = crate::resources::texture_2d(
             device,
@@ -136,7 +169,7 @@ impl WorldScale {
             size,
             texture,
             view,
-            depth: crate::device::create_depth_texture(device, size[0], size[1]),
+            depth,
             bind_group,
         }
     }
@@ -144,6 +177,7 @@ impl WorldScale {
     /// Forget the targets: the window changed, and the sizes with it.
     pub fn clear(&mut self) {
         self.targets.clear();
+        self.outs.clear();
     }
 
     /// Draw `target` over the whole of `frame` (the tests' blit; a frame draws through

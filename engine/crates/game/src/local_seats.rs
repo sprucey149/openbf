@@ -545,6 +545,7 @@ impl<Id: Copy + PartialEq> Party<Id> {
 
     /// Does waiting seat `i` ask whoever takes it for their profile, as its returning pad
     /// can't be told from another seat's ([`Party::join_pad_alike`])?
+    #[cfg(test)]
     pub fn is_unsure(&self, i: usize) -> bool {
         self.unsure.get(i).copied().unwrap_or(false)
     }
@@ -560,7 +561,7 @@ impl<Id: Copy + PartialEq> Party<Id> {
 
     /// Two or more are seated and every seated player is Ready (the original's rule), and no
     /// two seats are Ready on one profile (a waiting seat whose pick was freed while its pad
-    /// could not be told apart, [`Party::is_unsure`], and another seat took that profile).
+    /// could not be told apart, `Party::is_unsure`, and another seat took that profile).
     pub fn can_start(&self) -> bool {
         self.owners.count() >= 2
             && self.twice().is_empty()
@@ -616,7 +617,7 @@ impl<Id: Copy + PartialEq> Party<Id> {
 
     /// The ids seats other than `seat` hold: their Ready and lent profiles, and the current
     /// profile's `host_id` while seat 0 is seated (as the host or choosing). A waiting seat
-    /// that will ask for its profile again ([`Party::is_unsure`]) holds no guest pick: its
+    /// that will ask for its profile again (`Party::is_unsure`) holds no guest pick: its
     /// player may be the one choosing now.
     pub fn held_ids(&self, seat: usize, host_id: Option<u64>) -> Vec<u64> {
         (0..input::owners::MAX_LOCAL_PLAYERS)

@@ -426,22 +426,14 @@ impl Ctx<'_> {
     /// cell's pixels, its top-left at 0, 0) as the Players screen's lost notice is. The line the
     /// player acts on is the largest and brightest, with its button's glyph when it names one.
     pub(crate) fn lost_cell(&mut self, notice: &LostCell, size: [f32; 2]) {
-        self.quad(
+        self.fill(
             usize::MAX,
-            &glam::Mat4::IDENTITY,
             &Screen {
                 origin: [0.0, 0.0],
                 scale: [1.0, 1.0],
             },
-            &crate::hud_draw::Quad {
-                rect: [0.0, 0.0, size[0], size[1]],
-                uv: [0.0, 0.0, 1.0, 1.0],
-                color: LOST_FILL,
-                texture: "white",
-                additive: false,
-                shadow: false,
-                boxed: false,
-            },
+            [0.0, 0.0, size[0], size[1]],
+            LOST_FILL,
         );
         let s = profiles::screen_in([0.0, 0.0, size[0], size[1]]);
         let across = [24.0, 0.0, 488.0, 0.0];

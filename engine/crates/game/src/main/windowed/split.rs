@@ -862,7 +862,7 @@ pub(in crate::windowed) fn note_split_medals(
 /// own feed (`feeds[i - 1]`), with their own side's banner and their own stats pages (`stats[i]`)
 /// at the round's end. An away view (`away[i]`, or a missing feed) gets `None`: its handle may
 /// name a bot's unit. Every kind of round builds them the same way, a space round included.
-pub(in crate::windowed) fn further_view_models(
+pub(crate) fn further_view_models(
     walk: &mut game::walk::WalkSim,
     feeds: &mut [game::event_feed::EventFeed],
     away: &[bool],
@@ -1729,7 +1729,7 @@ impl App {
 }
 
 /// Everything the extra views build from, borrowed from the `App` for one frame.
-pub(in crate::windowed) struct ViewParts<'a> {
+pub(crate) struct ViewParts<'a> {
     pub walk: &'a mut game::walk::WalkSim,
     pub cube: MeshHandle,
     pub gpu: &'a mut game::viewer::SceneGpu,
@@ -1760,7 +1760,7 @@ pub(in crate::windowed) struct ViewParts<'a> {
 
 /// Paints view `i`'s UI (`game::split_ui::SplitUi::paint`) into the window's image: called for
 /// every view, a player who is away included.
-pub(in crate::windowed) type ViewHud<'a> = &'a mut dyn FnMut(
+pub(crate) type ViewHud<'a> = &'a mut dyn FnMut(
     usize,
     Cell,
     &wgpu::Device,
@@ -2073,7 +2073,7 @@ struct Built {
 /// Each extra view's camera carries its own shake (`cameras[i]`, from `Fx::shake_of`) and its rain
 /// is sized to its cell (issue #194 B13).
 #[allow(clippy::too_many_arguments)]
-pub(in crate::windowed) fn render_views(
+pub(crate) fn render_views(
     p: &mut ViewParts<'_>,
     r: &mut Renderer,
     cells: &[Cell],

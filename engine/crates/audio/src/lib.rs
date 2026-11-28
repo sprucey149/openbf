@@ -6,8 +6,43 @@
 use std::path::Path;
 
 pub mod limiter;
+#[cfg(feature = "backend")]
+pub mod output;
 pub mod stream;
 pub use stream::{MusicVoice, StreamTake, TakeReader};
+
+/// What the mixer is handed for a level, rate and pan the game computed: a
+/// non-finite level is silence (unity for +inf), a non-finite rate plays
+/// at unity, a non-finite pan is centred. kira takes NaN as it comes, and a
+/// NaN voice writes NaN frames into the mix until it ends.
+#[cfg(feature = "backend")]
+pub(crate) fn sane(volume_db: f32, rate: f64, pan: f32) -> (f32, f64, f32) {
+    let db = if volume_db.is_finite() {
+        volume_db
+    } else if volume_db == f32::INFINITY {
+        0.0
+    } else {
+        -100.0
+    };
+    let rate = if rate.is_finite() { rate } else { 1.0 };
+    let pan = if pan.is_finite() {
+        pan.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+    (db, rate, pan)
+}
+
+/// A tween's length: `Duration::from_secs_f32` panics on infinity, so a
+/// non-finite or negative time is instant.
+#[cfg(feature = "backend")]
+pub(crate) fn tween_secs(secs: f32) -> std::time::Duration {
+    if secs.is_finite() && secs > 0.0 {
+        std::time::Duration::from_secs_f32(secs.min(3600.0))
+    } else {
+        std::time::Duration::ZERO
+    }
+}
 
 /// Handle to a playing looped sound.
 pub struct LoopHandle {
@@ -30,12 +65,13 @@ impl Voice {
         #[cfg(feature = "backend")]
         {
             let tween = kira::Tween {
-                duration: std::time::Duration::from_secs_f32(secs.max(0.0)),
+                duration: crate::tween_secs(secs),
                 ..Default::default()
             };
+            let (volume_db, rate, pan) = sane(volume_db, rate, pan);
             self.inner.set_volume(volume_db, tween);
             self.inner.set_playback_rate(rate, tween);
-            self.inner.set_panning(pan.clamp(-1.0, 1.0), tween);
+            self.inner.set_panning(pan, tween);
         }
         #[cfg(not(feature = "backend"))]
         {
@@ -165,9 +201,14 @@ pub const VOICE_SOUND_CAPACITY: usize = 32;
 /// `FUN_0038b3c8`).
 pub const PAUSE_FADE_SECS: f32 = 0.1;
 
+/// The mixer's backend: the system's default output behind the watchdog
+/// that keeps it open ([`output`]).
+#[cfg(feature = "backend")]
+type Backend = output::Watched<output::Cpal>;
+
 pub struct Audio {
     #[cfg(feature = "backend")]
-    manager: kira::AudioManager<kira::DefaultBackend>,
+    manager: kira::AudioManager<Backend>,
     /// [`Bus::Game`]: a sub-track of the main one, so the limiter covers it.
     #[cfg(feature = "backend")]
     game: kira::track::TrackHandle,
@@ -175,6 +216,75 @@ pub struct Audio {
     #[cfg(feature = "backend")]
     voice: kira::track::TrackHandle,
     game_paused: bool,
+    #[cfg_attr(not(feature = "backend"), allow(dead_code))]
+    refused: Refused,
+}
+
+/// OURS: refused starts are logged at most this often per bus, with a
+/// count, instead of one line each (a full bus refuses hundreds a second).
+/// measure: none needed - a log rate, not a mix value.
+const REFUSED_LOG_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The play-failure log, rate-limited ([`REFUSED_LOG_EVERY`]).
+#[derive(Default)]
+struct Refused {
+    buses: Vec<RefusedBus>,
+}
+
+struct RefusedBus {
+    name: &'static str,
+    /// When this bus last logged a line.
+    logged: std::time::Instant,
+    /// Starts refused since, and when the first and last of them were.
+    count: u64,
+    span: Option<(std::time::Instant, std::time::Instant)>,
+}
+
+impl RefusedBus {
+    /// Log the refusals not logged yet, if any.
+    fn flush(&mut self) {
+        if let Some((first, last)) = self.span.take() {
+            eprintln!(
+                "audio: {} more plays refused on {} over {:.1} s",
+                self.count,
+                self.name,
+                last.duration_since(first).as_secs_f32()
+            );
+            self.count = 0;
+        }
+    }
+}
+
+impl Refused {
+    #[cfg_attr(not(feature = "backend"), allow(dead_code))]
+    fn note(&mut self, bus: &'static str, why: impl FnOnce() -> String) {
+        let now = std::time::Instant::now();
+        match self.buses.iter_mut().find(|b| b.name == bus) {
+            Some(b) if now.duration_since(b.logged) < REFUSED_LOG_EVERY => {
+                b.count += 1;
+                b.span = Some((b.span.map_or(now, |s| s.0), now));
+            }
+            Some(b) => {
+                b.flush();
+                eprintln!("audio: play failed on {bus} ({})", why());
+                b.logged = now;
+            }
+            None => {
+                eprintln!("audio: play failed on {bus} ({})", why());
+                self.buses.push(RefusedBus {
+                    name: bus,
+                    logged: now,
+                    count: 0,
+                    span: None,
+                });
+            }
+        }
+    }
+
+    /// Log every bus's refusals not logged yet (a round ends).
+    fn flush(&mut self) {
+        self.buses.iter_mut().for_each(RefusedBus::flush);
+    }
 }
 
 impl Audio {
@@ -186,9 +296,13 @@ impl Audio {
             let settings = kira::AudioManagerSettings {
                 main_track_builder: kira::track::MainTrackBuilder::new()
                     .with_effect(limiter::Builder),
+                backend_settings: output::Settings {
+                    output: output::Cpal,
+                    timing: output::Timing::default(),
+                },
                 ..Default::default()
             };
-            let mut manager = match kira::AudioManager::<kira::DefaultBackend>::new(settings) {
+            let mut manager = match kira::AudioManager::<Backend>::new(settings) {
                 Ok(manager) => manager,
                 Err(e) => {
                     eprintln!("audio: backend unavailable ({e})");
@@ -213,6 +327,7 @@ impl Audio {
                     game,
                     voice,
                     game_paused: false,
+                    refused: Refused::default(),
                 }),
                 Err(e) => {
                     eprintln!("audio: voice bus unavailable ({e})");
@@ -263,6 +378,7 @@ impl Audio {
     /// (gunfire, explosion tails, voice-over) would otherwise resume over the
     /// shell.
     pub fn clear_game_bus(&mut self) {
+        self.refused.flush();
         #[cfg(feature = "backend")]
         {
             // Pause immediately before renewing so held sounds do not leak
@@ -341,8 +457,8 @@ impl Audio {
             use kira::sound::static_sound::StaticSoundData;
             let data = StaticSoundData::from_cursor(std::io::Cursor::new(pak::read(path)?))?
                 .loop_region(..)
-                .playback_rate(rate)
-                .volume(volume_db);
+                .playback_rate(sane(volume_db, rate, 0.0).1)
+                .volume(sane(volume_db, rate, 0.0).0);
             let inner = self.game.play(data)?;
             Ok(LoopHandle { inner })
         }
@@ -450,33 +566,26 @@ impl Audio {
         rate: f64,
         pan: f32,
     ) -> Option<kira::sound::static_sound::StaticSoundHandle> {
-        let data = sound
-            .volume(volume_db)
-            .playback_rate(rate)
-            .panning(pan.clamp(-1.0, 1.0));
+        let (volume_db, rate, pan) = sane(volume_db, rate, pan);
+        let data = sound.volume(volume_db).playback_rate(rate).panning(pan);
         let (track, name) = match bus {
             Bus::Game => (&mut self.game, "game"),
             Bus::Voice => (&mut self.voice, "voice"),
             Bus::Menu => {
-                return self
-                    .manager
-                    .play(data)
-                    .inspect_err(|e| {
-                        eprintln!("audio: play failed on menu ({e})");
-                    })
-                    .ok()
+                let played = self.manager.play(data);
+                if let Err(e) = &played {
+                    self.refused.note("menu", || e.to_string());
+                }
+                return played.ok();
             }
         };
-        track
-            .play(data)
-            .inspect_err(|e| {
-                eprintln!(
-                    "audio: play failed on {name} ({e}) [{} of {} sounds]",
-                    track.num_sounds(),
-                    track.sound_capacity()
-                );
-            })
-            .ok()
+        let (num, cap) = (track.num_sounds(), track.sound_capacity());
+        let played = track.play(data);
+        if let Err(e) = &played {
+            self.refused
+                .note(name, || format!("{e} [{num} of {cap} sounds]"));
+        }
+        played.ok()
     }
 
     pub fn stop(&mut self, handle: &mut LoopHandle) {
@@ -616,6 +725,23 @@ mod tests {
         audio.play_oneshot_on(Bus::Voice, &data, -60.0, 1.0, 0.0);
         assert!(audio.voice_num_sounds() > before);
         assert_eq!(audio.num_sounds(), 0);
+    }
+
+    /// A level, rate, pan or fade the game got wrong (NaN, infinity) never
+    /// reaches kira as it is, and finite values pass untouched.
+    #[cfg(feature = "backend")]
+    #[test]
+    fn non_finite_mix_values_are_made_safe() {
+        assert_eq!(sane(-6.0, 0.8, -0.25), (-6.0, 0.8, -0.25));
+        assert_eq!(sane(0.0, 1.0, 3.0), (0.0, 1.0, 1.0));
+        let (db, rate, pan) = sane(f32::NAN, f64::INFINITY, f32::NAN);
+        assert_eq!((db, rate, pan), (-100.0, 1.0, 0.0));
+        assert_eq!(sane(f32::NEG_INFINITY, 1.0, 0.0).0, -100.0);
+        assert_eq!(sane(f32::INFINITY, 1.0, 0.0).0, 0.0);
+        assert_eq!(tween_secs(f32::INFINITY), std::time::Duration::ZERO);
+        assert_eq!(tween_secs(f32::NAN), std::time::Duration::ZERO);
+        assert_eq!(tween_secs(-1.0), std::time::Duration::ZERO);
+        assert_eq!(tween_secs(0.5), std::time::Duration::from_secs_f32(0.5));
     }
 
     /// Opening the mixer must never panic; a box without an output device

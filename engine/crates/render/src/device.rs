@@ -343,6 +343,7 @@ impl Renderer {
             surface.configure(&self.device, config);
             self.depth_view = create_depth_texture(&self.device, width, height);
             self.world_scale.clear();
+            self.forget_bloom_direct();
             self.water_reflect.clear();
         }
     }

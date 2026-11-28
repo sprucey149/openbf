@@ -362,6 +362,7 @@ name = "audio"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cpal",
  "kira",
  "pak",
  "symphonia",
@@ -1416,8 +1417,6 @@ dependencies = [
 [[package]]
 name = "gilrs"
 version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "902fb00d3f6398e635be22e5c837b303c501835cca7ac11a47bba138f7aafdd8"
 dependencies = [
  "fnv",
  "gilrs-core",
@@ -1841,6 +1840,7 @@ version = "0.1.0"
 dependencies = [
  "core",
  "gilrs",
+ "libc",
  "serde",
 ]
 
@@ -3269,6 +3269,7 @@ dependencies = [
  "glam",
  "image",
  "pollster",
+ "render",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

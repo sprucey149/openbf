@@ -721,25 +721,6 @@ pub fn mod_cache_path(data_dir: &Path, namespace: &str) -> PathBuf {
     crate::profile::mod_cache_dir(data_dir).join(namespace)
 }
 
-pub fn dedup_sorted(items: impl IntoIterator<Item = String>) -> Vec<String> {
-    let set: BTreeSet<String> = items.into_iter().collect();
-    set.into_iter().collect()
-}
-
-pub fn normalize_override_map_key(rel_path: &str) -> String {
-    rel_path
-        .replace('\\', "/")
-        .trim_start_matches('/')
-        .to_ascii_lowercase()
-}
-
-pub fn collect_map_modes_summary(map: &ModMapSummary) -> BTreeMap<&'static str, Vec<String>> {
-    let mut out = BTreeMap::new();
-    out.insert("gcw", map.modes_gcw.clone());
-    out.insert("cw", map.modes_cw.clone());
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -56,6 +56,10 @@ impl Limiter {
     /// ceiling: the gain falls at once to the least any frame in the window
     /// needs (that frame included), and rises back by the release.
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
+        // A non-finite sample (a NaN voice) is dropped from the mix rather
+        // than reaching the device or the gain.
+        let l = if l.is_finite() { l } else { 0.0 };
+        let r = if r.is_finite() { r } else { 0.0 };
         let n = self.frames.len();
         let peak = l.abs().max(r.abs());
         self.frames[self.at] = (l, r);
@@ -166,5 +170,18 @@ mod tests {
         let quiet = take(48_000, 0.3);
         run(&mut lim, &quiet, &quiet);
         assert!(lim.gain() > 0.999, "{}", lim.gain());
+    }
+
+    /// A NaN or infinite frame (a voice handed NaN) leaves as silence and
+    /// leaves the gain where it was.
+    #[test]
+    fn a_non_finite_frame_is_dropped() {
+        let mut lim = Limiter::new(48_000);
+        let d = lim.delay();
+        let mut out = vec![lim.process(f32::NAN, f32::INFINITY)];
+        out.extend((0..d).map(|_| lim.process(0.5, -0.5)));
+        assert_eq!(out[d], (0.0, 0.0));
+        assert_eq!(lim.gain(), 1.0);
+        assert_eq!(lim.process(0.0, 0.0), (0.5, -0.5));
     }
 }

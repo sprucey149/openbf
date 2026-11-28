@@ -32,17 +32,32 @@ impl SoundLib {
         if let Some(voice) = self.loops.get_mut(&request.source) {
             if let Some(voice) = voice {
                 voice.set(db, rate, pan, core::TICK_DT);
+                return true;
             }
-            return true;
+            // A loop the full bus refused starts once there is room; one
+            // with no take stays silent.
+            if !self.refused_loops.contains(&request.source)
+                || audio.num_sounds() >= audio::GAME_SOUND_CAPACITY
+            {
+                return true;
+            }
         }
         let path = self.find(request.sound).and_then(|(p, core)| {
             let id = self.pick_sample(&p.samples)?;
             self.bank(core)?.sample_path(id)
         });
+        let path = path.filter(|p| self.sound(audio, p).is_ok());
         let voice = path
-            .filter(|p| self.sound(audio, p).is_ok())
-            .and_then(|p| audio.play_voice(&self.cache[&p], db, rate, pan));
+            .as_ref()
+            .and_then(|p| audio.play_voice(&self.cache[p], db, rate, pan));
         self.played += u64::from(voice.is_some());
+        if voice.is_none() && path.is_some() {
+            let loops = &self.loops;
+            self.refused_loops.retain(|k| loops.contains_key(k));
+            self.refused_loops.insert(request.source);
+        } else {
+            self.refused_loops.remove(&request.source);
+        }
         self.loops.insert(request.source, voice);
         true
     }

@@ -160,10 +160,6 @@ impl LvlFacts {
             .map(|r| (r.tag.clone(), r.name.clone()))
             .collect()
     }
-
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.resources.iter().any(|r| r.tag == tag)
-    }
 }
 
 /// One stock LVL.

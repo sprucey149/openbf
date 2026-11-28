@@ -91,20 +91,3 @@ def proxy_surface(scene,identity,tolerance):
     result=surface_from_triangles(triangles)
     if result is None:raise ValueError('no actual active collision surface')
     return result,math.nextafter(worst,math.inf),selection.catalog,frames
-
-
-def placed_draw_surfaces(source,identity,paths):
-    from render_contact_check import draw_surfaces,surface_from_triangles
-    from render_collision_check import placed
-    potential,covered,records=draw_surfaces(source,paths)
-    instance=source.instances[identity]
-    frame=dict(rotation=[[f32(v) for v in c] for c in instance['rotation']],translation=[f32(v) for v in instance['translation']])
-    outer=surface_from_triangles([tuple(placed(p,frame) for p in tri) for tri in potential.triangles]) if potential else None
-    inner=surface_from_triangles([tuple(placed(p,frame) for p in tri) for tri in covered.triangles]) if covered else None
-    extent=max(1.,*(abs(v) for p in potential.vertices for v in p)) if potential else 1.
-    rows=max(sum(abs(frame['rotation'][c][r]) for c in range(3)) for r in range(3))
-    translation=max(abs(v) for v in frame['translation'])
-    # 32u exceeds the forward-error bound of the affine four-term draw and
-    # raw-ray transforms, including fused/unfused evaluation and f32 inputs.
-    guard=math.nextafter(32*(2.**-23)*(rows*extent+translation+1.),math.inf)
-    return outer,inner,records,guard

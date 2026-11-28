@@ -728,14 +728,6 @@ impl Peer {
         }
     }
 
-    /// Local player `i`'s input pacer ([`Peer::pacer`] for 0).
-    pub fn pacer_of(&self, i: usize) -> &InputPacer {
-        match i {
-            0 => &self.pacer,
-            _ => self.extra.get(i - 1).map_or(&self.pacer, LocalQueue::pacer),
-        }
-    }
-
     /// Every slot of this machine's players, local 0 first.
     pub fn local_slots(&self) -> Vec<u8> {
         (0..self.local_count())
@@ -1156,12 +1148,19 @@ impl Peer {
             } => {
                 // The groups that differed, while this peer still holds
                 // its rows of those ticks (a later report keeps the last).
-                if usize::from(width) == desync::COLUMNS.len() {
-                    let theirs: Vec<(u32, desync::Row)> = values
-                        .chunks_exact(desync::COLUMNS.len())
+                let theirs: Vec<(u32, desync::Row)> = if usize::from(width) == desync::COLUMNS.len()
+                {
+                    values
+                        .as_chunks::<{ desync::COLUMNS.len() }>()
+                        .0
+                        .iter()
                         .enumerate()
-                        .map(|(i, v)| (first_tick + i as u32, v.try_into().expect("width 6")))
-                        .collect();
+                        .map(|(i, v)| (first_tick + i as u32, *v))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                if !theirs.is_empty() {
                     if let Some((_, cols)) =
                         desync::first_difference(&self.ring.before(tick), &theirs)
                     {
@@ -1172,18 +1171,10 @@ impl Peer {
                         }
                     }
                 }
-                let rows: Vec<String> = if usize::from(width) == desync::COLUMNS.len() {
-                    values
-                        .chunks_exact(desync::COLUMNS.len())
-                        .enumerate()
-                        .map(|(i, v)| {
-                            let row: desync::Row = v.try_into().expect("width 6");
-                            desync::format_row(first_tick + i as u32, &row)
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                let rows: Vec<String> = theirs
+                    .iter()
+                    .map(|(t, r)| desync::format_row(*t, r))
+                    .collect();
                 if let Some(p) = self
                     .awaiting
                     .get_mut(&slot)
@@ -1355,11 +1346,7 @@ impl Peer {
                     (report.guest.hash, report.guest.rows) = (sent.hash, sent.rows);
                 } else {
                     self.send_rows(link, tick);
-                    report.guest.hash = self
-                        .ring
-                        .get(tick)
-                        .map_or_else(String::new, |r| format!("{:016x}", r[0]));
-                    report.guest.rows = self.rows_before(tick);
+                    (report.guest.hash, report.guest.rows) = self.own_rows(tick);
                 }
                 self.write_report(report, out);
                 self.stats.desyncs += 1;
@@ -1405,14 +1392,12 @@ impl Peer {
                 Some(PeerNotice::SendRows { round_id, tick }) => {
                     if round_id == self.round_id && self.ring.get(tick).is_some() {
                         self.send_rows(link, tick);
+                        let (hash, rows) = self.own_rows(tick);
                         self.sent_rows = Some(SentRows {
                             round_id,
                             tick,
-                            hash: self
-                                .ring
-                                .get(tick)
-                                .map_or_else(String::new, |r| format!("{:016x}", r[0])),
-                            rows: self.rows_before(tick),
+                            hash,
+                            rows,
                         });
                     }
                 }
@@ -1840,6 +1825,16 @@ impl Peer {
             .iter()
             .map(|(t, r)| desync::format_row(*t, r))
             .collect()
+    }
+
+    /// This peer's hash at `tick` (empty when its ring no longer holds it)
+    /// and its rows for a report there, as text.
+    fn own_rows(&self, tick: u32) -> (String, Vec<String>) {
+        let hash = self
+            .ring
+            .get(tick)
+            .map_or_else(String::new, |r| format!("{:016x}", r[0]));
+        (hash, self.rows_before(tick))
     }
 
     /// A guest sends the host its rows at `tick` (`Msg::DesyncHashes`).

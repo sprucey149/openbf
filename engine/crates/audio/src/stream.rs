@@ -362,9 +362,10 @@ impl MusicVoice {
         #[cfg(feature = "backend")]
         {
             let tween = kira::Tween {
-                duration: std::time::Duration::from_secs_f32(secs.max(0.0)),
+                duration: crate::tween_secs(secs),
                 ..Default::default()
             };
+            let volume_db = crate::sane(volume_db, 1.0, 0.0).0;
             match &mut self.inner {
                 MusicHandle::Authored(inner) => inner.set_volume(volume_db, tween),
                 MusicHandle::Restored(inner) => inner.set_volume(volume_db, tween),
@@ -399,6 +400,7 @@ impl crate::Audio {
         #[cfg(feature = "backend")]
         {
             use kira::sound::streaming::StreamingSoundData;
+            let volume_db = crate::sane(volume_db, 1.0, 0.0).0;
             if take.path.extension().is_some_and(|ext| ext == "flac") {
                 let mut data = restored_data(&take)?.volume(volume_db);
                 if looping {
