@@ -393,15 +393,9 @@ fn main() -> Result<()> {
                     other => bail!("unknown shell flag: {other}"),
                 }
             }
-            let _ = game::mods_runtime::mount_enabled_mods(
-                &extensions::profile::discover_data_dir(),
-                &assets,
-                &missions,
-                no_mods,
-            );
             logged(|| {
                 let resolved = extensions_host::resolve_startup(&global_overrides, true)?;
-                run_shell(assets, missions, resolved)
+                run_shell(assets, missions, resolved, no_mods)
             })
         }
         "--render-icon" => {

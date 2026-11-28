@@ -526,6 +526,7 @@ fn load_cached_or_convert(
         ));
         return None;
     };
+    set_converting(Some(entry.folder_name.clone()));
     println!(
         "mods: preparing `{}` ({}) -> {}",
         entry.folder_name,
@@ -624,7 +625,10 @@ fn level_layer(mod_id: &str, cache_dir: &Path, map_key: &str) -> Option<OverlayL
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            // The listing already says which entries are folders; asking
+            // each path again costs a disk query per file, and a large mod
+            // has tens of thousands. (A cache holds no links.)
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
                 pending.push(path);
             } else if let Ok(rel) = path.strip_prefix(&assets) {
                 let rel = rel.to_string_lossy().replace('\\', "/");
@@ -640,6 +644,29 @@ fn level_layer(mod_id: &str, cache_dir: &Path, map_key: &str) -> Option<OverlayL
             scope: Some(format!("{}{}", pak::LEVEL_SCOPE, map_key.to_ascii_lowercase())),
         },
     })
+}
+
+/// What [`mount_enabled_mods`] is doing, for the title screen to show.
+#[derive(Clone, Default)]
+pub struct MountStatus {
+    /// The folder of the mod being converted, which takes minutes.
+    pub converting: Option<String>,
+}
+
+static MOUNT_STATUS: RwLock<MountStatus> = RwLock::new(MountStatus { converting: None });
+
+pub fn mount_status() -> MountStatus {
+    MOUNT_STATUS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+fn set_converting(mod_folder: Option<String>) {
+    MOUNT_STATUS
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .converting = mod_folder;
 }
 
 /// Scan `openbf_data/mods/`, ensure caches for enabled mods from `extensions.ron`,
@@ -707,6 +734,7 @@ pub fn mount_enabled_mods(
         let Some(entry) = by_id.get(mod_id) else {
             continue;
         };
+        set_converting(None);
         if let Some((meta, cache_dir)) =
             load_cached_or_convert(entry, data_dir, &inputs, &mut report)
         {
@@ -742,6 +770,7 @@ pub fn mount_enabled_mods(
         eprintln!("mods: {err}");
     }
 
+    set_converting(None);
     let mut overlays: Vec<OverlayLayer> = Vec::new();
     // Each addon map's own units stand over everything else on that map.
     let mut level_layers: Vec<OverlayLayer> = Vec::new();
