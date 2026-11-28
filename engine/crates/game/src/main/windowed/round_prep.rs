@@ -72,6 +72,15 @@ fn ms(t: Instant) -> f64 {
 }
 
 impl RoundJob {
+    /// The era the round's mission files are looked up under: a LAN round's,
+    /// else the playlist row's.
+    pub fn mission_era(&self) -> Option<&str> {
+        self.net
+            .as_ref()
+            .and_then(|(r, _)| r.era.as_deref())
+            .or(self.era.as_deref())
+    }
+
     /// The setup and the walk, exactly as `App::start_battle` built them.
     pub fn walk(&self, scene: &game::assets::Scene) -> Result<(BattleSetup, WalkSim)> {
         use super::super::round_setup::{battle_setup, build_round, campaign_setup, shell_setup};
@@ -124,15 +133,15 @@ impl RoundJob {
                 self.mode.as_str()
             };
             let pair = [self.row_armies[0].as_str(), self.row_armies[1].as_str()];
-            let era = self
-                .net
-                .as_ref()
-                .and_then(|(r, _)| r.era.as_deref())
-                .or(self.era.as_deref());
-            let banks =
-                game::mission::pick_for_era(&self.missions_dir, &self.name, mission_mode, pair, era)
-                    .map(|p| p.mission.sound)
-                    .unwrap_or_default();
+            let banks = game::mission::pick_for_era(
+                &self.missions_dir,
+                &self.name,
+                mission_mode,
+                pair,
+                self.mission_era(),
+            )
+            .map(|p| p.mission.sound)
+            .unwrap_or_default();
             let lib = game::sounds::SoundLib::load_with_fallback(&dir, &banks);
             (lib, ms(t))
         };

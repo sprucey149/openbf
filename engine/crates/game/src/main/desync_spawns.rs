@@ -167,6 +167,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         &missions,
         &setup.map,
         &setup.mode,
+        setup.era.as_deref(),
     ));
     if let Some((path, Err(error))) = load.common {
         bail!("common assets at {} unreadable: {error:#}", path.display());

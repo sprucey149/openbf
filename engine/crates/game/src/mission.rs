@@ -578,11 +578,15 @@ pub fn pick_index(missions: &[[String; 2]], armies: [&str; 2]) -> Option<(usize,
 /// list (BF2 Hoth's back shields and shield generator, Kashyyyk's flag
 /// bases). Other modes keep their scene as baked; a missing or unreadable
 /// mission removes nothing.
-pub fn scene_kills(dir: &Path, map: &str, mode: &str) -> Vec<String> {
+pub fn scene_kills(dir: &Path, map: &str, mode: &str, era: Option<&str>) -> Vec<String> {
     if mode != "hunt" {
         return Vec::new();
     }
-    MissionDef::load(&dir.join(format!("{map}_hunt.ron")))
+    let file = match custom_era(era) {
+        Some(era) => format!("{map}_hunt_era_{era}.ron"),
+        None => format!("{map}_hunt.ron"),
+    };
+    MissionDef::load(&dir.join(file))
         .map(|m| m.scene_kills().to_vec())
         .unwrap_or_default()
 }
@@ -693,6 +697,11 @@ pub fn pick(dir: &Path, map: &str, mode: &str, armies: [&str; 2]) -> Option<Pick
     pick_for_era(dir, map, mode, armies, None)
 }
 
+/// `era` when it is a mod's own, which names its mission files.
+fn custom_era(era: Option<&str>) -> Option<&str> {
+    era.filter(|e| !e.is_empty() && !matches!(*e, "cw" | "gcw"))
+}
+
 /// Like [`pick`], targeting a mod-declared custom era (`<map>_<mode>_era_<era>.ron`)
 /// when `era` is `Some(code)` outside stock `"cw"`/`"gcw"`.
 pub fn pick_for_era(
@@ -702,7 +711,7 @@ pub fn pick_for_era(
     armies: [&str; 2],
     era: Option<&str>,
 ) -> Option<Pick> {
-    if let Some(custom) = era.filter(|e| !e.is_empty() && !matches!(*e, "cw" | "gcw")) {
+    if let Some(custom) = custom_era(era) {
         let path = dir.join(format!("{map}_{mode}_era_{custom}.ron"));
         match MissionDef::load(&path) {
             Ok(mission) => {

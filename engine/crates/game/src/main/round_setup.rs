@@ -343,6 +343,7 @@ pub(super) fn mission_layers_for(
     map: &str,
     mode: &str,
     armies: Option<&[String; 2]>,
+    era: Option<&str>,
     script: Option<&str>,
 ) -> Vec<String> {
     if mode.eq_ignore_ascii_case("campaign") {
@@ -356,7 +357,8 @@ pub(super) fn mission_layers_for(
     let pair = armies
         .map(|a| [a[0].as_str(), a[1].as_str()])
         .unwrap_or(["", ""]);
-    game::mission::pick(missions_dir, map, mission_mode, pair)
+    // A custom era's mission is found only by its era, as the setup picks it.
+    game::mission::pick_for_era(missions_dir, map, mission_mode, pair, era)
         .map(|p| p.mission.layers)
         .unwrap_or_default()
 }
@@ -379,6 +381,7 @@ pub(super) fn rebuilder(
                 &round.map,
                 &round.mode,
                 Some(&round.armies),
+                round.era.as_deref(),
                 None,
             );
             let (mut scene, load) =
@@ -387,6 +390,7 @@ pub(super) fn rebuilder(
                 &missions_dir,
                 &round.map,
                 &round.mode,
+                round.era.as_deref(),
             ));
             if let Some((path, Err(error))) = load.common {
                 anyhow::bail!("common assets at {} unreadable: {error:#}", path.display());
@@ -889,6 +893,26 @@ mod tests {
             }
             assert!(seen[0] > 0 && seen[1] > 0, "{case}: opening bots {seen:?}");
         }
+    }
+
+    #[test]
+    fn a_custom_era_mission_gives_its_own_world_layers() {
+        let dir = std::env::temp_dir().join(format!("openbf-era-layers-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("x_wav_era_1.ron");
+        std::fs::write(
+            &file,
+            r#"(map: "x", mode: "wav", source_game: "bf2", layers: ["x_conquest"], teams: [
+                (faction: "all", units: 1, tickets: 1),
+                (faction: "imp", units: 1, tickets: 1)],
+                ai_alive_cap: 1, spawn_delay: 10.0, spawn_interval: 0.25)"#,
+        )
+        .unwrap();
+        let armies = ["all".to_owned(), "imp".to_owned()];
+        let layers = mission_layers_for(&dir, "x", "wav", Some(&armies), Some("1"), None);
+        std::fs::remove_file(file).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+        assert_eq!(layers, ["x_conquest"]);
     }
 
     #[test]
