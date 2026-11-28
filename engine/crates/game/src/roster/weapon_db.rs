@@ -361,6 +361,7 @@ pub(super) fn weapon_stage(
             .and_then(|n| explosion_class(db, n.trim()));
         w.rounds_per_clip = 0;
         w.flash = None;
+        w.melee_class = true;
         return Ok(w);
     }
     if db.is_bf2() && db.engine_base(weapon) == Some("areaeffectweapon") {

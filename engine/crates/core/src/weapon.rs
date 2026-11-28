@@ -405,6 +405,11 @@ pub struct WeaponClass {
     pub force: Option<crate::hero_weapon::ForcePower>,
     pub saber_throw: Option<crate::hero_weapon::SaberThrow>,
     pub saber: Option<Box<crate::hero_weapon::SaberClass>>,
+    /// A BF2 `melee` class (the PS2's WeaponMelee, vtable 0x629838): while
+    /// either channel holds one the view is third person
+    /// (`analysis/re-first-person.md` §3.1). `saber` is not this: only the
+    /// weapons openbf swings carry it.
+    pub melee_class: bool,
     /// An `emitterordnance` class's data (the arc casters, the incinerator,
     /// the flamethrowers; `analysis/re-ordnance-kinds.md` §8). `None` = the
     /// class is not an emitter.
@@ -602,6 +607,7 @@ impl Default for WeaponClass {
             force: None,
             saber_throw: None,
             saber: None,
+            melee_class: false,
             emitter: None,
             cloak: None,
             guided: None,

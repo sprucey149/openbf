@@ -223,6 +223,7 @@ impl WeaponClass {
             force: None,
             saber_throw: None,
             saber: None,
+            melee_class: false,
             emitter: None,
             cloak: None,
             guided: None,

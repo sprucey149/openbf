@@ -255,6 +255,20 @@ impl Sim {
                 .is_some_and(|m| m.input_lock & combo::TURN != 0)
     }
 
+    /// Does either channel's current weapon force third person? BF2's
+    /// soldier `FUN_002557a0` asks both selected slots (E+0x7e0 and +0x7e1),
+    /// in hand or not.
+    pub(super) fn holds_melee(&self, i: usize) -> bool {
+        let unit = &self.units[i];
+        let secondary = unit
+            .cur1
+            .and_then(|k| unit.held.get(usize::from(k)))
+            .map(|h| h.class);
+        std::iter::once(unit.weapon_class)
+            .chain(secondary)
+            .any(|c| self.weapon_classes.get(c).is_some_and(|w| w.melee_class))
+    }
+
     pub(super) fn saber_constants(&self, i: usize, constants: &mut SoldierConstants) {
         let unit = &self.units[i];
         if !unit.alive || unit.mount.is_some() || unit.soldier.no_fire() || unit.choked.is_some() {
