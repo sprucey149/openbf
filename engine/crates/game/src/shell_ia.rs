@@ -39,7 +39,14 @@ pub fn instant_action(
     difficulty: core::skill::Difficulty,
 ) -> InstantAction {
     let mut ia = catalog_action(assets_dir, missions_dir, difficulty, true);
-    if std::env::var_os(extensions::profile::GROUP_MAPS_ENV).is_some() {
+    let group_maps = match std::env::var_os(extensions::profile::GROUP_MAPS_ENV) {
+        Some(v) => !v.is_empty() && v != "0",
+        None => extensions::profile::LauncherRuntimeConfig::load(
+            &extensions::profile::discover_data_dir(),
+        )
+        .group_maps_by_source,
+    };
+    if group_maps {
         ia.group_by_source();
     }
     ia
