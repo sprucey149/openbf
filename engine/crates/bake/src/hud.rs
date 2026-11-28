@@ -92,6 +92,40 @@ fn node(n: &ConfigNode) -> HudNode {
     }
 }
 
+/// The records of a side LVL's `hud_` chunks, in file order. Unlike a
+/// layout of INGAME.LVL they have no `FileInfo` name: the game builds each
+/// record beside the ones already loaded.
+pub(crate) fn side_hud(lvl: &[u8]) -> Result<Vec<HudNode>> {
+    let inner = mungefs::open(lvl).map_err(|e| anyhow!("{e}"))?;
+    let content = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
+    let mut nodes = Vec::new();
+    for c in content.iter().filter(|c| &c.tag == b"hud_") {
+        let l = mungefs::hud::parse(c).map_err(|e| anyhow!("hud_ 0x{:X}: {e}", c.offset))?;
+        if l.file_name().is_none() {
+            nodes.extend(l.nodes.iter().map(node));
+        }
+    }
+    Ok(nodes)
+}
+
+/// Every model `nodes` can name: both ends of a `NameMesh` row, and a
+/// `MeshInfo` or `Mesh` record's model. Lowercase.
+pub(crate) fn hud_models(nodes: &[HudNode], out: &mut BTreeSet<String>) {
+    for n in nodes {
+        let count = match n.name.to_ascii_lowercase().as_str() {
+            "namemesh" => 2,
+            "meshinfo" | "mesh" => 1,
+            _ => 0,
+        };
+        for a in n.args.iter().take(count) {
+            if let HudArg::Str(s) = a {
+                out.insert(s.to_ascii_lowercase());
+            }
+        }
+        hud_models(&n.children, out);
+    }
+}
+
 fn strings(ns: &[HudNode], out: &mut BTreeSet<String>) {
     for n in ns {
         for a in &n.args {

@@ -12,6 +12,18 @@
 //! bolt sheets (`side_bf2/effects/addon/`), and the vehicles of each side
 //! LVL a mission loads a vehicle from (`side_bf2/vehicles/0addon*/`). Sounds
 //! are not converted here.
+//!
+//! Each side's animation combos go to `side_bf2/combos/<side>.ron` under
+//! the name the scripts read it by, over the stock side of that name.
+//!
+//! A side LVL may add to the HUD (`hud_` chunks: new elements, and more
+//! `NameMesh` tables). Their records go to `common_bf2/hud/addon.ron` in read
+//! order, and the icon models they name are baked with the weapons.
+//!
+//! A soldier's `FirstPerson = <path>;<model>` names arms in
+//! `_LVL_PC/FPM/<path>.lvl`. Where that is a file only the mod has, the arms
+//! are written below their path, `side_bf2/fpm/<path>/<model>.glb`: a mod's
+//! LVL may reuse a stock arm model's name.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -19,10 +31,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use extensions::mods::catalog::{LvlFacts, SourceGame, SourcePlatform};
 use manifest::class_patch::{ClassPatch, ClassPatchFile, CLASS_PATCH_SCHEMA};
+use manifest::combo::ComboSet;
 use manifest::ClassDef;
 
 use super::replace::sibling_sides;
 use super::ModEnv;
+use crate::soldier::Wearers;
 use crate::stock::StockAssets;
 
 /// Legacy addons are Battlefront II's.
@@ -40,6 +54,9 @@ pub(super) struct LevelSides {
     pub sides: Vec<(String, PathBuf)>,
     /// `(stem, class)`: the classes the missions' `ReadDataFile` calls name.
     pub requests: BTreeSet<(String, String)>,
+    /// `(side, request)` of every `ReadDataFile` of the missions, the stock
+    /// sides' too. Lowercase.
+    pub reads: BTreeSet<(String, String)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -53,6 +70,10 @@ struct SideLvl {
     classes: Vec<ClassDef>,
     facts: LvlFacts,
     models: BTreeSet<String>,
+    /// The records its `hud_` chunks add to the HUD.
+    hud: Vec<manifest::hud::HudNode>,
+    /// Its animation combos and which `ReadDataFile` request loads which.
+    combos: ComboSet,
     wanted: BTreeMap<String, Model>,
     out: PathBuf,
     /// The models that were written.
@@ -97,6 +118,49 @@ fn chain<'a>(classes: &HashMap<String, &'a ClassDef>, name: &str) -> Vec<&'a Cla
         cur = def.base.to_ascii_lowercase();
     }
     out
+}
+
+/// The units `others` define that wear `model` and `own` does not: their
+/// classes with their BASE chains and weapons, and those LVLs' combos.
+fn wearers(model: &str, own: &SideLvl, others: &[&SideLvl]) -> Option<Wearers> {
+    let name = |def: &ClassDef| def.name.to_ascii_lowercase();
+    let defined: BTreeSet<String> = own.classes.iter().map(name).collect();
+    let mut classes: HashMap<String, &ClassDef> = HashMap::new();
+    for def in own
+        .classes
+        .iter()
+        .chain(others.iter().flat_map(|l| &l.classes))
+    {
+        classes.entry(name(def)).or_insert(def);
+    }
+    let mut taken = BTreeSet::new();
+    let mut out = Wearers::default();
+    for lvl in others {
+        let mut gives = false;
+        for def in lvl.classes.iter().filter(|c| c.kind == "entc") {
+            if defined.contains(&name(def)) {
+                continue;
+            }
+            let units = chain(&classes, &def.name);
+            if !prop(&units, "GeometryName").is_some_and(|g| g.eq_ignore_ascii_case(model)) {
+                continue;
+            }
+            let held: Vec<&ClassDef> = weapons(&units)
+                .iter()
+                .flat_map(|w| chain(&classes, w))
+                .collect();
+            for c in units.iter().copied().chain(held) {
+                if !defined.contains(&name(c)) && taken.insert(name(c)) {
+                    out.classes.push(c.clone());
+                    gives = true;
+                }
+            }
+        }
+        if gives {
+            out.combos.push(lvl.combos.clone());
+        }
+    }
+    (!out.classes.is_empty()).then_some(out)
 }
 
 /// The stock bake's BF2 class files: `(file name, classes)`.
@@ -145,6 +209,7 @@ fn is_stock_copy(env: &ModEnv, facts: &LvlFacts, def: &ClassDef) -> bool {
 pub(super) fn convert_addon_sides(
     levels: &[LevelSides],
     script_names: &BTreeSet<String>,
+    mod_dir: &Path,
     env: &ModEnv,
     staging: &Path,
     progress: &mut dyn FnMut(&str),
@@ -178,15 +243,29 @@ pub(super) fn convert_addon_sides(
                 crate::classes::MalformedClass::Skip,
             )?;
             let facts = mungefs::inventory::scan_bytes(&buf);
-            Ok((classes, facts))
+            // A HUD that cannot be read costs only the side's icons.
+            let hud = crate::hud::side_hud(&buf).map_err(|e| format!("{e:#}"));
+            let combos =
+                crate::combo::baked_mod_combos_from_lvl(&buf).map_err(|e| format!("{e:#}"));
+            Ok((classes, facts, hud, combos))
         });
-        let (classes, facts) = match read {
+        let (classes, facts, hud, combos) = match read {
             Ok(x) => x,
             Err(e) => {
                 warnings.push(format!("The addon's {stem}.lvl could not be read ({e:#})."));
                 continue;
             }
         };
+        let hud = hud.unwrap_or_else(|e| {
+            warnings.push(format!("The addon's {stem}.lvl HUD could not be read ({e})."));
+            Vec::new()
+        });
+        let combos = combos.unwrap_or_else(|e| {
+            warnings.push(format!(
+                "The addon's {stem}.lvl animation combos could not be read ({e})."
+            ));
+            ComboSet::default()
+        });
         let models = facts
             .resources
             .iter()
@@ -201,6 +280,8 @@ pub(super) fn convert_addon_sides(
                 classes,
                 facts,
                 models,
+                hud,
+                combos,
                 wanted: BTreeMap::new(),
                 out,
                 baked: BTreeMap::new(),
@@ -214,6 +295,10 @@ pub(super) fn convert_addon_sides(
     // vehicle one of its missions loads.
     let mut vehicle_sides: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); levels.len()];
     let mut unknown = BTreeSet::new();
+    // By a body's LVL and model, the other LVLs of the maps that take it.
+    let mut beside: BTreeMap<(PathBuf, String), Vec<PathBuf>> = BTreeMap::new();
+    // Per map, the first-person arms its soldiers name: `(path, model)`.
+    let mut level_arms: Vec<BTreeSet<(String, String)>> = vec![BTreeSet::new(); levels.len()];
     for (index, level) in levels.iter().enumerate() {
         let mut wanted: Vec<(PathBuf, String, Model)> = Vec::new();
         {
@@ -236,6 +321,15 @@ pub(super) fn convert_addon_sides(
                     wanted.push((path.clone(), model, kind));
                 }
             };
+            let mut icons = BTreeSet::new();
+            for (_, path) in &level.sides {
+                if let Some(l) = lvls.get(path) {
+                    crate::hud::hud_models(&l.hud, &mut icons);
+                }
+            }
+            for model in &icons {
+                want(model, Model::Weapon);
+            }
             // A script may pick a unit while it runs (a random hero) and
             // load it by a variable, so every soldier of the map's sides that
             // a script of the mod names is asked for too.
@@ -265,6 +359,9 @@ pub(super) fn convert_addon_sides(
                     }
                     continue;
                 }
+                if let Some(arms) = prop(&units, "FirstPerson").and_then(arm_ref) {
+                    level_arms[index].insert(arms);
+                }
                 if let Some(body) = prop(&units, "GeometryName") {
                     want(body, Model::Soldier);
                 }
@@ -281,6 +378,14 @@ pub(super) fn convert_addon_sides(
             }
         }
         for (path, model, kind) in wanted {
+            if kind == Model::Soldier {
+                let others = beside.entry((path.clone(), model.clone())).or_default();
+                for (_, other) in &level.sides {
+                    if *other != path && !others.contains(other) {
+                        others.push(other.clone());
+                    }
+                }
+            }
             if let Some(l) = lvls.get_mut(&path) {
                 // A model both a body and a held item name is a body.
                 l.wanted
@@ -292,6 +397,21 @@ pub(super) fn convert_addon_sides(
     }
     if !unknown.is_empty() {
         warnings.push(summary("addon classes no LVL defines", &unknown));
+    }
+
+    // A map's layer holds one copy of a model, so that copy serves the
+    // units of every LVL the map reads.
+    let mut worn: BTreeMap<PathBuf, BTreeMap<String, Wearers>> = BTreeMap::new();
+    for ((path, model), others) in &beside {
+        let Some(own) = lvls.get(path) else {
+            continue;
+        };
+        let others: Vec<&SideLvl> = others.iter().filter_map(|p| lvls.get(p)).collect();
+        if let Some(w) = wearers(model, own, &others) {
+            worn.entry(path.clone())
+                .or_default()
+                .insert(model.clone(), w);
+        }
     }
 
     // The addon's own `all.lvl` and the like stand beside the other stock
@@ -309,7 +429,8 @@ pub(super) fn convert_addon_sides(
             lvl.wanted.len()
         ));
         let work = scratch.join(format!("work{done}"));
-        if let Err(e) = bake_side(env, stock, path, lvl, &work, &mut warnings) {
+        let wearers = worn.remove(path).unwrap_or_default();
+        if let Err(e) = bake_side(env, stock, path, lvl, wearers, &work, &mut warnings) {
             warnings.push(format!(
                 "The addon's {}.lvl units could not be converted ({e:#}).",
                 lvl.stem
@@ -342,6 +463,23 @@ pub(super) fn convert_addon_sides(
         }
     }
 
+    // Arms that fail cost only the first-person view, never the conversion.
+    let arms = bake_arms(
+        &level_arms,
+        mod_dir,
+        env,
+        stock,
+        &scratch,
+        progress,
+        &mut warnings,
+    )
+    .unwrap_or_else(|e| {
+        warnings.push(format!(
+            "The addon's first-person arms could not be converted ({e:#})."
+        ));
+        BTreeMap::new()
+    });
+
     // Maps that read the same sides share one effects layer. The layers are
     // independent, so they bake together over one read of each side.
     let orders: Vec<Vec<&PathBuf>> = levels
@@ -357,10 +495,7 @@ pub(super) fn convert_addon_sides(
             unique.push((order, &level.map_key));
         }
     }
-    let bufs: BTreeMap<&PathBuf, _> = lvls
-        .keys()
-        .map(|p| (p, crate::gameplay::read(p)))
-        .collect();
+    let bufs: BTreeMap<&PathBuf, _> = lvls.keys().map(|p| (p, crate::gameplay::read(p))).collect();
     let jobs: Vec<usize> = (0..unique.len()).collect();
     let layer_dir = |at: usize| scratch.join(format!("fx{at}"));
     let results = crate::soldier::in_parallel(
@@ -392,6 +527,11 @@ pub(super) fn convert_addon_sides(
             write_level(level, env, stock, &stock_files, &lvls, staging)
                 .with_context(|| format!("writing the addon units of {}", level.map_key))?;
             let to = staging.join("levels").join(&level.map_key).join("assets");
+            for (arm_path, model) in &level_arms[at] {
+                if let Some(baked) = arms.get(arm_path) {
+                    write_arms(baked, arm_path, model, &to)?;
+                }
+            }
             link_files(&layer_dir(layer_of[at]), &to.join(EFFECTS_DIR))?;
             for &side in &vehicle_sides[at] {
                 let (stem, path) = &level.sides[side];
@@ -411,6 +551,144 @@ pub(super) fn convert_addon_sides(
     written.into_iter().collect::<Result<()>>()?;
     let _ = std::fs::remove_dir_all(&scratch);
     Ok(warnings)
+}
+
+/// `FirstPerson = <path>;<model>` as `(path, model)`, lowercase with `/`.
+fn arm_ref(value: &str) -> Option<(String, String)> {
+    let (path, model) = value.split_once(';')?;
+    let path = path.trim().replace('\\', "/").to_ascii_lowercase();
+    let model = model.trim().to_ascii_lowercase();
+    let plain = path
+        .split('/')
+        .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(':'));
+    (plain && !model.is_empty()).then_some((path, model))
+}
+
+/// The mod's own first-person LVLs by their path below `FPM/`, without the
+/// extension. A `backups` folder is not part of the mod's data.
+fn mod_arm_lvls(mod_dir: &Path) -> BTreeMap<String, PathBuf> {
+    let mut out = BTreeMap::new();
+    for rel in files_below(mod_dir) {
+        let lower = rel.to_ascii_lowercase();
+        if lower.split('/').any(|part| part == "backups") {
+            continue;
+        }
+        let Some((_, below)) = lower.split_once("_lvl_pc/fpm/") else {
+            continue;
+        };
+        if let Some(path) = below.strip_suffix(".lvl") {
+            out.entry(path.to_owned())
+                .or_insert_with(|| mod_dir.join(&rel));
+        }
+    }
+    out
+}
+
+/// Bake each first-person LVL the maps name that only the mod has, by path.
+/// The stock game's paths keep the stock arms, or the mod's replacement of
+/// them (`super::replace`).
+fn bake_arms(
+    level_arms: &[BTreeSet<(String, String)>],
+    mod_dir: &Path,
+    env: &ModEnv,
+    stock: &StockAssets,
+    scratch: &Path,
+    progress: &mut dyn FnMut(&str),
+    warnings: &mut Vec<String>,
+) -> Result<BTreeMap<String, ArmBake>> {
+    let mut out = BTreeMap::new();
+    let named: BTreeSet<&String> = level_arms.iter().flatten().map(|(p, _)| p).collect();
+    if named.is_empty() {
+        return Ok(out);
+    }
+    let own = mod_arm_lvls(mod_dir);
+    let catalog = env.catalogs.get(GAME, SourcePlatform::Pc);
+    let wanted: Vec<(&String, &PathBuf)> = named
+        .into_iter()
+        .filter(|p| catalog.is_none_or(|c| c.by_path(&format!("fpm/{p}.lvl")).is_none()))
+        .filter_map(|p| own.get(p).map(|file| (p, file)))
+        .collect();
+    if wanted.is_empty() {
+        return Ok(out);
+    }
+    progress("Converting the addon's first-person arms...");
+    let work = scratch.join("arms_work");
+    std::fs::create_dir_all(&work)?;
+    let label = "the addon's first-person arms";
+    let Some(anims) = super::replace::anim_lvl(env, &work, GAME, "bf2_anims", label, warnings)?
+    else {
+        warnings.push(format!("{label}: no bf2 animation LVL is configured"));
+        return Ok(out);
+    };
+    let buf = std::fs::read(&anims).with_context(|| anims.display().to_string())?;
+    let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
+    let banks = mungefs::anim::find_banks(inner).map_err(|e| anyhow!("{e}"))?;
+    let bank = banks
+        .iter()
+        .find(|b| b.name.eq_ignore_ascii_case(manifest::fpm::BF2_BANK))
+        .ok_or_else(|| anyhow!("{}: no first-person animation bank", anims.display()))?;
+    for (at, (path, file)) in wanted.into_iter().enumerate() {
+        let root = scratch.join(format!("arms{at}"));
+        let side = root.join(format!("side_{GAME_KEY}"));
+        let source = file.to_string_lossy();
+        let baked = crate::tier::PcTextures::load(&source).and_then(|pc| {
+            crate::fpm::bake_fpm_with_bank(&source, bank, &side.to_string_lossy(), Some(&pc))
+        });
+        match baked {
+            Ok(Some(baked)) => {
+                copy_tier2(&root, stock)?;
+                out.insert(
+                    path.clone(),
+                    ArmBake {
+                        model: baked.name.to_ascii_lowercase(),
+                        side,
+                    },
+                );
+            }
+            Ok(None) => warnings.push(format!("{label}: {path}.lvl holds no arm model")),
+            Err(e) => warnings.push(format!("{label}: {path}.lvl: {e:#}")),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&work);
+    Ok(out)
+}
+
+/// One baked first-person LVL: its arm model and the `side_bf2` it is in.
+struct ArmBake {
+    model: String,
+    side: PathBuf,
+}
+
+/// Put one named arm model into a map's layer. A texture the map's sides
+/// already wrote stays.
+fn write_arms(baked: &ArmBake, path: &str, model: &str, assets: &Path) -> Result<()> {
+    if baked.model != model {
+        return Ok(());
+    }
+    let side = assets.join(format!("side_{GAME_KEY}"));
+    let to = side.join("fpm").join(path).join(format!("{model}.glb"));
+    let from = manifest::fpm::glb_path(&baked.side, model);
+    if !to.exists() {
+        std::fs::create_dir_all(to.parent().expect("fpm dir"))?;
+        if std::fs::hard_link(&from, &to).is_err() {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    link_files(&baked.side.join("textures"), &side.join("textures"))
+}
+
+/// A sheet the stock bake has at both texture tiers is the addon's at both.
+fn copy_tier2(root: &Path, stock: &StockAssets) -> Result<()> {
+    for rel in files_below(root) {
+        let Some(base) = rel.strip_suffix(".ktx2") else {
+            continue;
+        };
+        let tier2 = format!("{base}.tier2.ktx2");
+        if !base.ends_with(".tier2") && !root.join(&tier2).is_file() && stock.exists(&tier2) {
+            std::fs::copy(root.join(&rel), root.join(&tier2))?;
+        }
+    }
+    Ok(())
 }
 
 /// The position in `level`'s read order of the first side that defines `class`.
@@ -515,6 +793,7 @@ fn bake_side(
     stock: &StockAssets,
     path: &Path,
     lvl: &mut SideLvl,
+    wearers: BTreeMap<String, Wearers>,
     work: &Path,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
@@ -530,7 +809,8 @@ fn bake_side(
         Some(&anims.to_string_lossy()),
         Some(&source),
     )?
-    .low_needs_same_sheets();
+    .low_needs_same_sheets()
+    .with_wearers(wearers);
 
     let side_out = lvl.out.join(format!("side_{GAME_KEY}"));
     let side_out_s = side_out.to_string_lossy().into_owned();
@@ -589,16 +869,7 @@ fn bake_side(
             .sheets()?
             .write(&plan, &side_out.join("textures"), cache.pc_textures())?;
     }
-    // A sheet the stock bake has at both texture tiers is the addon's at both.
-    for rel in files_below(&lvl.out) {
-        let Some(base) = rel.strip_suffix(".ktx2") else {
-            continue;
-        };
-        let tier2 = format!("{base}.tier2.ktx2");
-        if !base.ends_with(".tier2") && !lvl.out.join(&tier2).is_file() && stock.exists(&tier2) {
-            std::fs::copy(lvl.out.join(&rel), lvl.out.join(&tier2))?;
-        }
-    }
+    copy_tier2(&lvl.out, stock)?;
     Ok(())
 }
 
@@ -632,7 +903,11 @@ fn write_level(
 ) -> Result<()> {
     let root = staging.join("levels").join(&level.map_key);
     let assets = root.join("assets");
-    let sides: Vec<&SideLvl> = level.sides.iter().filter_map(|(_, p)| lvls.get(p)).collect();
+    let sides: Vec<&SideLvl> = level
+        .sides
+        .iter()
+        .filter_map(|(_, p)| lvls.get(p))
+        .collect();
 
     for side in &sides {
         for rel in files_below(&side.out) {
@@ -668,6 +943,21 @@ fn write_level(
     if !removed.is_empty() {
         std::fs::create_dir_all(&root)?;
         crate::write_ron(&root.join("removed.ron"), &removed)?;
+    }
+
+    write_combos(level, stock, lvls, &assets)?;
+
+    let nodes: Vec<_> = sides.iter().flat_map(|s| s.hud.iter().cloned()).collect();
+    if !nodes.is_empty() {
+        let dir = assets.join(format!("common_{GAME_KEY}/hud"));
+        std::fs::create_dir_all(&dir)?;
+        crate::write_ron(
+            &dir.join("addon.ron"),
+            &manifest::hud::HudLayout {
+                name: "addon".into(),
+                nodes,
+            },
+        )?;
     }
 
     // The classes. An addon class goes into the shared file every round
@@ -715,6 +1005,86 @@ fn write_level(
     Ok(())
 }
 
+/// The combo table of each side the missions read, by the name they read it
+/// by. A side with no request index (a failed or empty read) writes none.
+fn write_combos(
+    level: &LevelSides,
+    stock: &StockAssets,
+    lvls: &BTreeMap<PathBuf, SideLvl>,
+    assets: &Path,
+) -> Result<()> {
+    let mut sets: BTreeMap<String, ComboSet> = BTreeMap::new();
+    for (stem, path) in &level.sides {
+        let Some(own) = lvls.get(path).filter(|l| !l.combos.loads.is_empty()) else {
+            continue;
+        };
+        match sets.entry(stem.to_ascii_lowercase()) {
+            std::collections::btree_map::Entry::Vacant(e) => {
+                e.insert(own.combos.clone());
+            }
+            std::collections::btree_map::Entry::Occupied(mut e) => {
+                add_combos(e.get_mut(), &own.combos)
+            }
+        }
+    }
+    let table = |stem: &str| format!("side_{GAME_KEY}/combos/{stem}.ron");
+    let stock_set = |stem: &str| -> Result<Option<ComboSet>> {
+        let rel = table(stem);
+        stock
+            .read(&rel)
+            .map(|bytes| {
+                ron::from_str(std::str::from_utf8(&bytes)?)
+                    .with_context(|| format!("the stock build's {rel}"))
+            })
+            .transpose()
+    };
+    // The scripts may read the stock side of a name too.
+    for (stem, set) in &mut sets {
+        if let Some(under) = stock_set(stem)? {
+            add_combos(set, &under);
+        }
+    }
+    // A request no LVL holds loads nothing in the game. The table says so:
+    // OpenBF refuses a mission with a request its table does not know.
+    for (stem, request) in &level.reads {
+        let hash = mungefs::fnv1a_lowercase(request);
+        if !sets.contains_key(stem) {
+            let under = stock_set(stem)?;
+            if under.as_ref().is_some_and(|s| s.loads.contains_key(&hash)) {
+                continue;
+            }
+            let empty = ComboSet {
+                scope_provenance: true,
+                load_provenance: true,
+                ..ComboSet::default()
+            };
+            sets.insert(stem.clone(), under.unwrap_or(empty));
+        }
+        if let Some(set) = sets.get_mut(stem) {
+            set.loads.entry(hash).or_default();
+        }
+    }
+    for (stem, set) in sets {
+        let rel = table(&stem);
+        let to = assets.join(&rel);
+        std::fs::create_dir_all(to.parent().expect("combos dir"))?;
+        crate::write_ron(&to, &set)?;
+    }
+    Ok(())
+}
+
+/// Add what `under` has and `set` lacks: its requests and its combos.
+fn add_combos(set: &mut ComboSet, under: &ComboSet) {
+    for (request, combos) in &under.loads {
+        set.loads.entry(*request).or_insert_with(|| combos.clone());
+    }
+    for combo in &under.combos {
+        if !set.combos.iter().any(|c| c.name_hash == combo.name_hash) {
+            set.combos.push(combo.clone());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,12 +1102,72 @@ mod tests {
     }
 
     #[test]
+    fn another_lvls_unit_wearing_a_model_is_baked_into_it() {
+        let side = |classes: Vec<ClassDef>| SideLvl {
+            stem: String::new(),
+            classes,
+            facts: LvlFacts::default(),
+            models: BTreeSet::new(),
+            hud: Vec::new(),
+            combos: ComboSet::default(),
+            wanted: BTreeMap::new(),
+            out: PathBuf::new(),
+            baked: BTreeMap::new(),
+        };
+        let own = side(vec![def("jedi", "soldier", &[])]);
+        let other = side(vec![
+            def("lord", "jedi", &[("GeometryName", "body"), ("WeaponName", "blade")]),
+            def("blade", "melee", &[]),
+            def("trooper", "soldier", &[("GeometryName", "armour")]),
+        ]);
+        let w = wearers("body", &own, &[&other]).unwrap();
+        let names: Vec<&str> = w.classes.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["lord", "blade"]);
+        assert_eq!(w.combos.len(), 1);
+        assert!(wearers("cape", &own, &[&other]).is_none());
+    }
+
+    #[test]
+    fn a_sides_combos_win_over_the_ones_under_them() {
+        let combo = |name_hash| manifest::combo::ComboDef {
+            name_hash,
+            fields: Vec::new(),
+        };
+        let mut set = ComboSet {
+            loads: BTreeMap::from([(1, vec![10])]),
+            combos: vec![combo(10)],
+            ..ComboSet::default()
+        };
+        let under = ComboSet {
+            loads: BTreeMap::from([(1, vec![99]), (2, vec![20, 10])]),
+            combos: vec![combo(10), combo(20)],
+            ..ComboSet::default()
+        };
+        add_combos(&mut set, &under);
+        assert_eq!(set.loads, BTreeMap::from([(1, vec![10]), (2, vec![20, 10])]));
+        assert_eq!(set.combos, vec![combo(10), combo(20)]);
+    }
+
+    #[test]
+    fn first_person_arms_are_a_path_below_fpm_and_a_model() {
+        assert_eq!(
+            arm_ref("RVS\\SithRed;all_1st_StredTrooper"),
+            Some(("rvs/sithred".into(), "all_1st_stredtrooper".into()))
+        );
+        assert_eq!(arm_ref("all_1st_trooper"), None);
+        assert_eq!(arm_ref("..\\x;m"), None);
+        assert_eq!(arm_ref("c:\\x;m"), None);
+    }
+
+    #[test]
     fn a_vehicle_comes_from_the_first_side_read_that_defines_it() {
         let side = |classes: &[&str]| SideLvl {
             stem: String::new(),
             classes: classes.iter().map(|n| def(n, "hover", &[])).collect(),
             facts: LvlFacts::default(),
             models: BTreeSet::new(),
+            hud: Vec::new(),
+            combos: ComboSet::default(),
             wanted: BTreeMap::new(),
             out: PathBuf::new(),
             baked: BTreeMap::new(),
@@ -750,6 +1180,7 @@ mod tests {
             map_key: "m".into(),
             sides: vec![("A".into(), "a.lvl".into()), ("B".into(), "b.lvl".into())],
             requests: BTreeSet::new(),
+            reads: BTreeSet::new(),
         };
         assert_eq!(defining_side(&level, &lvls, "X_TANK"), Some(0));
         assert_eq!(defining_side(&level, &lvls, "x_walker"), Some(1));
@@ -776,7 +1207,10 @@ mod tests {
             def(
                 "side_inf_trooper",
                 "side_inf_default",
-                &[("GeometryName", "\"trooper_body\""), ("WeaponName1", "Rifle")],
+                &[
+                    ("GeometryName", "\"trooper_body\""),
+                    ("WeaponName1", "Rifle"),
+                ],
             ),
         ];
         let classes: HashMap<String, &ClassDef> =

@@ -349,7 +349,7 @@ pub(super) fn sibling_sides(
 /// The animation LVL of `game` the stock bake used (`role` in
 /// `catalog/stock_bake.ron`, checked byte for byte), else the configured
 /// PS2 copy's, else the PC copy's.
-fn anim_lvl(
+pub(super) fn anim_lvl(
     env: &ModEnv,
     scratch: &Path,
     game: SourceGame,

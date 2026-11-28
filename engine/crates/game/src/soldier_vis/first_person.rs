@@ -172,7 +172,8 @@ impl FirstPersonVisuals {
         model: &str,
         cache: &mut HashMap<String, Option<TextureHandle>>,
     ) -> Option<FpArms> {
-        let glb = manifest::fpm::glb_path(side, model);
+        let (own, by_model) = manifest::fpm::arms_path(side, model);
+        let glb = own.filter(|path| pak::is_file(path)).unwrap_or(by_model);
         let asset = match load_skinned_glb(&glb) {
             Ok(a) => a,
             Err(e) => {

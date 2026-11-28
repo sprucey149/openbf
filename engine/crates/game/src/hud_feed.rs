@@ -325,6 +325,7 @@ pub struct HudView {
     assets_dir: PathBuf,
     layout: manifest::hud::HudLayout,
     transforms: manifest::hud::HudLayout,
+    addon: Option<manifest::hud::HudLayout>,
     /// Whose state `hud`, `leaving` and `settled` hold (0 is the first player), and the others'
     /// parked states by player index (the active player's entry is `None`).
     active: usize,
@@ -624,6 +625,43 @@ fn place_secondary_cutters(hud: &mut Hud, has_bf2_mesh: impl Fn(&str) -> bool) {
     }
 }
 
+/// `[ours]` A weapon model the layout does not place shows at the element's
+/// own pose, which on the PS2 is a third of the size and beside the row. A
+/// mod's `hud_` records can place such a model in one slot only (a cutter in
+/// row 2, while units that inherit its `HUDTag` carry it in row 1). Where the
+/// turn and size the mod gives it are exactly those of a stock placement in a
+/// row, the two models are posed alike, so the row places the mod's model
+/// there. `elems[first..]` are the mod's.
+/// measure: the PC game's row-1 icon for such a cutter.
+fn place_mod_models(hud: &mut Hud, first: usize) {
+    let alike = |a: glam::Vec3, b: glam::Vec3| a.abs_diff_eq(b, 1e-3);
+    let theirs: Vec<_> = hud.elems[first..]
+        .iter()
+        .flat_map(|e| &e.mesh_info)
+        .filter(|info| info.rot != glam::Vec3::ZERO)
+        .cloned()
+        .collect();
+    for row in ["player1weapon1mesh", "player1weapon2mesh"] {
+        let Some(i) = hud.find(row) else { continue };
+        for info in &theirs {
+            let infos = &hud.elems[i].mesh_info;
+            if infos.iter().any(|own| own.mesh == info.mesh) {
+                continue;
+            }
+            let Some(pos) = infos
+                .iter()
+                .find(|own| alike(own.rot, info.rot) && alike(own.scale, info.scale))
+                .map(|own| own.pos)
+            else {
+                continue;
+            };
+            let mut pose = info.clone();
+            pose.pos = pos;
+            hud.elems[i].mesh_info.push(pose);
+        }
+    }
+}
+
 /// Fit the shared chaingun art into the port's orthographic weapon rows.
 /// Measured at 640×480 on Geonosis: the lower row has 95 px between the ammo
 /// badge and the end of the backdrop, while the authored mesh spans 107 px.
@@ -663,6 +701,11 @@ fn load_mesh(path: &Path) -> Result<HudMesh> {
         .submeshes
         .iter()
         .enumerate()
+        // `[ours]` `com_inv_col` is the solid red sheet of the stock invisible
+        // walls. A mod blanks a weapon slot with a box wearing it, which at
+        // the HUD's scale would draw a few red pixels (trace: whether the PC
+        // build shows them).
+        .filter(|(_, (_, _, material, _, _))| !material.eq_ignore_ascii_case("com_inv_col"))
         .map(|(k, (start, count, material, layer, _))| {
             // Re-index the part's own vertices: a weapon model is laid out
             // on the CPU every frame, so carry only what it draws.
@@ -716,6 +759,7 @@ fn build_hud(
     assets_dir: &Path,
     layout: &manifest::hud::HudLayout,
     transforms: &manifest::hud::HudLayout,
+    addon: Option<&manifest::hud::HudLayout>,
     mesh_files: &HashMap<String, PathBuf>,
     art: &mut HudArt,
 ) -> Hud {
@@ -724,6 +768,11 @@ fn build_hud(
     ui::hud::add_leaving_line(&mut layout);
     ui::hud::add_spectate_lines(&mut layout);
     let mut hud = Hud::new(&layout, transforms);
+    if let Some(addon) = addon {
+        let first = hud.elems.len();
+        hud.append_addon(addon);
+        place_mod_models(&mut hud, first);
+    }
     let bf2_weapons = assets_dir.join("side_bf2/weapons");
     place_secondary_cutters(&mut hud, |name| {
         mesh_files
@@ -876,6 +925,13 @@ impl HudView {
         let layout: manifest::hud::HudLayout = read_ron(&common.join("hud/1playerhud.ron"))?;
         let transforms: manifest::hud::HudLayout = read_ron(&common.join("hud/hudtransforms.ron"))?;
         let index: manifest::hud::HudIndex = read_ron(&common.join("hud/index.ron"))?;
+        // What a mod map's side LVLs add (`bake mod-convert`).
+        let addon_file = common.join("hud/addon.ron");
+        let addon: Option<manifest::hud::HudLayout> = if pak::is_file(&addon_file) {
+            Some(read_ron(&addon_file)?)
+        } else {
+            None
+        };
         let mut art = HudArt::default();
         art.no_bf1_victory_sheet =
             !pak::is_file(assets_dir.join("common_bf1/textures/ig_victory_defeat.ktx2"));
@@ -906,7 +962,14 @@ impl HudView {
             assets_dir.join("side_bf2/locals/weapons"),
             assets_dir.join("side_bf1/locals/weapons"),
         ]);
-        let hud = build_hud(assets_dir, &layout, &transforms, &mesh_files, &mut art);
+        let hud = build_hud(
+            assets_dir,
+            &layout,
+            &transforms,
+            addon.as_ref(),
+            &mesh_files,
+            &mut art,
+        );
         let pause_art = [ui::typography::ITEM.face, ui::typography::BODY.face]
             .iter()
             .all(|face| art.menu_font(face.role()).is_some())
@@ -917,6 +980,7 @@ impl HudView {
             assets_dir: assets_dir.to_path_buf(),
             layout,
             transforms,
+            addon,
             active: 0,
             parked: Vec::new(),
             art,
@@ -975,6 +1039,7 @@ impl HudView {
                 &self.assets_dir,
                 &self.layout,
                 &self.transforms,
+                self.addon.as_ref(),
                 &self.mesh_files,
                 &mut self.art,
             ),

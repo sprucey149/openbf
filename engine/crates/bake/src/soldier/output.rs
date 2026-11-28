@@ -79,6 +79,15 @@ fn lender_path(name: &str) -> Option<std::ffi::OsString> {
     }
 }
 
+/// Units of other LVLs that wear one of a LVL's models.
+#[derive(Default)]
+pub(crate) struct Wearers {
+    /// Their `entc` and `wpnc` records, and the parents of those.
+    pub classes: Vec<manifest::ClassDef>,
+    /// Their LVLs' animation combos.
+    pub combos: Vec<manifest::combo::ComboSet>,
+}
+
 /// Pre-loaded side LVL, PC texture table, and animation/class/rig context
 /// shared across every soldier and weapon baked from one side LVL.
 ///
@@ -95,6 +104,8 @@ pub struct SideBakeCache {
     read_combos: fn(&[u8]) -> Result<manifest::combo::ComboSet>,
     anim: Option<AnimBakeCache>,
     low_same_sheets: bool,
+    /// By model, lowercase ([`SideBakeCache::with_wearers`]).
+    wearers: std::collections::BTreeMap<String, Wearers>,
     sheets: std::sync::OnceLock<std::result::Result<LvlSheets, String>>,
 }
 
@@ -222,6 +233,7 @@ impl SideBakeCache {
             read_combos,
             anim,
             low_same_sheets: false,
+            wearers: Default::default(),
             sheets: std::sync::OnceLock::new(),
         })
     }
@@ -230,6 +242,16 @@ impl SideBakeCache {
     /// model (a replacement side; `lod::bake`).
     pub fn low_needs_same_sheets(mut self) -> Self {
         self.low_same_sheets = true;
+        self
+    }
+
+    /// Units of other LVLs that wear a model of this one: its animations
+    /// and combos serve them too.
+    pub(crate) fn with_wearers(
+        mut self,
+        wearers: std::collections::BTreeMap<String, Wearers>,
+    ) -> Self {
+        self.wearers = wearers;
         self
     }
 
@@ -356,7 +378,10 @@ impl SideBakeCache {
                 None => anim_sets::plan_bf1(&anim_sets::bf1::inventory(&banks), &bones),
                 Some(sanm) => {
                     let mut reg = anim_sets::bf2::Registry::shipped();
-                    let soldiers = reg.register(&anim.classes_plan);
+                    let soldiers = match self.wearers.get(&m.name.to_ascii_lowercase()) {
+                        Some(w) => reg.register(&[&anim.classes_plan[..], &w.classes].concat()),
+                        None => reg.register(&anim.classes_plan),
+                    };
                     let mut families: Vec<usize> = soldiers
                         .iter()
                         .filter(|c| c.geometry.eq_ignore_ascii_case(&m.name))
@@ -409,7 +434,18 @@ impl SideBakeCache {
                         }
                     }
                 }
-                let bindings = crate::combo::model_bindings(&anim.classes_pose, &m.name);
+                let mut bindings = crate::combo::model_bindings(&anim.classes_pose, &m.name);
+                let own_bindings = bindings.len();
+                let wearers = self.wearers.get(&m.name.to_ascii_lowercase());
+                if let Some(w) = wearers {
+                    let classes = [&anim.classes_pose[..], &w.classes].concat();
+                    for binding in crate::combo::model_bindings(&classes, &m.name) {
+                        if !bindings.contains(&binding) {
+                            bindings.push(binding);
+                        }
+                    }
+                }
+                let theirs = wearers.map_or(&[][..], |w| &w.combos[..]);
                 if !bindings.is_empty() {
                     let own = match &self.own_combos {
                         Some(c) => c.clone(),
@@ -433,14 +469,29 @@ impl SideBakeCache {
                             beside.push((self.read_combos)(side)?);
                         }
                     }
-                    for binding in bindings {
-                        let combo = std::iter::once(&own)
-                            .chain(&beside)
+                    for (index, binding) in bindings.into_iter().enumerate() {
+                        let borrowed = index >= own_bindings;
+                        let (first, then) = if borrowed {
+                            (theirs, &beside[..])
+                        } else {
+                            (&beside[..], theirs)
+                        };
+                        let found = std::iter::once(&own)
+                            .chain(first)
+                            .chain(then)
                             .flat_map(|set| &set.combos)
-                            .find(|c| c.name_hash == binding.name_hash)
-                            .with_context(|| {
-                                format!("{}: missing combo 0x{:08x}", m.name, binding.name_hash)
-                            })?;
+                            .find(|c| c.name_hash == binding.name_hash);
+                        // Another LVL's unit must not cost this LVL its model.
+                        if borrowed && found.is_none() {
+                            meta.missing.push(format!(
+                                "combo:{}:0x{:08x}",
+                                binding.family, binding.name_hash
+                            ));
+                            continue;
+                        }
+                        let combo = found.with_context(|| {
+                            format!("{}: missing combo 0x{:08x}", m.name, binding.name_hash)
+                        })?;
                         let (extra, missing) =
                             crate::combo::resolve_animation_clips(&inv, &binding, combo);
                         meta.missing.extend(

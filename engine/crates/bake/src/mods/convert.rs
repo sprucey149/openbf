@@ -400,6 +400,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             warnings: convert_addon_sides(
                 &levels,
                 &script_names,
+                opts.mod_dir,
                 opts.env,
                 &staging,
                 &mut |msg| progress(opts.emit_progress, 81, msg),
@@ -573,10 +574,14 @@ fn level_sides(group: &mungefs::addon::AddonMapGroup<'_>) -> LevelSides {
         map_key: group.map_key.clone(),
         sides: Vec::new(),
         requests: Default::default(),
+        reads: Default::default(),
     };
     for planned in group.missions.iter().filter(|m| m.mission.supported) {
         let mission = planned.mission;
         for (side, request) in &mission.class_load_order {
+            level
+                .reads
+                .insert((side.to_ascii_lowercase(), request.to_ascii_lowercase()));
             let Some((_, path)) = mission.custom_side_lvls.iter().find(|(s, _)| s == side) else {
                 continue;
             };

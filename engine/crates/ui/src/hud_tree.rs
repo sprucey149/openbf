@@ -723,6 +723,12 @@ pub struct Hud {
     pub v_anchors: Vec<crate::hud_draw::VAnchor>,
 }
 
+/// Where the BF2 PC layout puts the two weapon slots, as fractions of the
+/// viewport: INGAME.LVL `hud_` `1playerhud`, `player1weaponinformation`
+/// (0, 1) plus `player1weapon1group` (0.346161, -0.450412) and
+/// `player1weapon2group` (0.353928, -0.414382).
+const PC_WEAPON_SLOTS: [[f32; 2]; 2] = [[0.346161, 0.549588], [0.353928, 0.585618]];
+
 /// `[ours]` [`Hud::clock`] wraps here so the f32 never grows coarse. A BF2
 /// UV scroll is a whole number of 1/255 repeats per second (the MTRL's
 /// bytes over 255, `mungefs::model::Segment::uv_scroll`), so every one is a
@@ -872,13 +878,74 @@ impl Hud {
                 hud.transform(t);
             }
         }
-        hud.v_anchors = vec![Default::default(); hud.elems.len()];
-        for k in 0..hud.roots.len() {
-            let r = hud.roots[k];
-            let a = crate::hud_draw::root_v_anchor(&hud, r);
-            hud.mark_anchor(r, a);
-        }
+        hud.set_anchors();
         hud
+    }
+
+    fn set_anchors(&mut self) {
+        self.v_anchors = vec![Default::default(); self.elems.len()];
+        for k in 0..self.roots.len() {
+            let r = self.roots[k];
+            let a = crate::hud_draw::root_v_anchor(self, r);
+            self.mark_anchor(r, a);
+        }
+    }
+
+    /// Add a mod's side-LVL HUD records. As on the PS2 (`FUN_003b8638`, each
+    /// factory allocating anew), its elements stand beside the loaded ones,
+    /// and its transforms run after them: an event's listeners are called in
+    /// the order they subscribed (`FUN_003b01a8` appends, `FUN_003b0228`
+    /// walks from the head), so a later table's output is the one that stays.
+    pub fn append_addon(&mut self, addon: &HudLayout) {
+        let first = self.elems.len();
+        for n in &addon.nodes {
+            let lname = n.name.to_ascii_lowercase();
+            if lname == "viewport" {
+                for t in &n.children {
+                    self.transform(t);
+                }
+            } else if let Some(kind) = kind_of(&lname) {
+                let i = self.element(n, kind, None);
+                self.roots.push(i);
+            } else {
+                // A mod may write a table outside its `Viewport`; the
+                // factory takes it by its own name either way.
+                self.transform(n);
+            }
+        }
+        self.fit_addon_slots(first);
+        self.set_anchors();
+    }
+
+    /// `[ours]` A mod writes the icons it draws over a weapon slot against the
+    /// PC layout's place for that slot. Each such model (one from element
+    /// `first` on that takes the slot's change event) moves as far as this
+    /// layout's slot stands from the PC's.
+    fn fit_addon_slots(&mut self, first: usize) {
+        for (row, [x, y]) in PC_WEAPON_SLOTS.iter().enumerate() {
+            let row = row + 1;
+            let Some(slot) = self.find(&format!("player1weapon{row}group")) else {
+                continue;
+            };
+            let mut here = Vec3::ZERO;
+            let mut at = Some(slot);
+            while let Some(i) = at {
+                here += self.elems[i].pos;
+                at = self.elems[i].parent;
+            }
+            let (px, py) = to_pixels(*x, *y, Some(&HudArg::Num(1.0)));
+            let moved = Vec3::new(here.x - px, here.y - py, 0.0);
+            let Some(list) = self.listeners.get(&format!("player1.weapon{row}.change")) else {
+                continue;
+            };
+            for &(i, what) in list {
+                if i >= first && what == Listen::Mesh {
+                    for info in &mut self.elems[i].mesh_info {
+                        info.pos += moved;
+                    }
+                }
+            }
+        }
     }
 
     fn mark_anchor(&mut self, i: usize, a: crate::hud_draw::VAnchor) {
@@ -1287,7 +1354,8 @@ impl Hud {
         has_mesh: &dyn Fn(&str) -> bool,
     ) -> Option<String> {
         let event = event.to_ascii_lowercase();
-        self.transforms.iter().find_map(|t| match t {
+        // [`Hud::send`] runs every table in order, so the last answer stays.
+        self.transforms.iter().rev().find_map(|t| match t {
             Transform::NameMesh { input, pairs, .. } if *input == event => {
                 resolve_mesh(pairs, key, has_mesh)
             }

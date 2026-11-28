@@ -49,6 +49,7 @@ pub use output::{
     bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, bake_weapon_with,
     set_lender, texture_flags, weapon_flags, weapon_nodes, BakedWeapon, SideBakeCache,
 };
+pub(crate) use output::Wearers;
 pub(crate) use sheets::{in_parallel, LvlSheets, Plan, Request};
 
 pub struct BakedSoldier {
