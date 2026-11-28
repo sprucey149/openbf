@@ -49,6 +49,9 @@ pub struct MountedModsReport {
     pub mod_maps: Vec<ModMapEntry>,
     pub custom_modes: BTreeMap<String, extensions::mods::ModModeMeta>,
     pub shell_icon_dirs: Vec<PathBuf>,
+    /// Each mod's own places for weapon models in the HUD's weapon rows, in
+    /// load order.
+    pub hud_icon_places: Vec<manifest::hud::HudLayout>,
     pub active_fingerprints: Vec<(String, String)>,
     pub override_digest: String,
     pub conflicts: Vec<ResourceOverrideConflict>,
@@ -62,6 +65,7 @@ static RUNTIME_STATE: RwLock<MountedModsReport> = RwLock::new(MountedModsReport 
     mod_maps: Vec::new(),
     custom_modes: BTreeMap::new(),
     shell_icon_dirs: Vec::new(),
+    hud_icon_places: Vec::new(),
     active_fingerprints: Vec::new(),
     override_digest: String::new(),
     conflicts: Vec::new(),
@@ -93,6 +97,15 @@ pub fn active_shell_icon_dirs() -> Vec<PathBuf> {
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .shell_icon_dirs
+        .clone()
+}
+
+/// The active mods' places for weapon models in the HUD's weapon rows.
+pub fn active_hud_icon_places() -> Vec<manifest::hud::HudLayout> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .hud_icon_places
         .clone()
 }
 
@@ -849,6 +862,16 @@ pub fn mount_enabled_mods(
             }
             if entry_meta.icon.is_none() {
                 entry_meta.icon = mode_meta.icon.clone();
+            }
+        }
+
+        let places = cache_dir.join("hud").join("weapon_icons.ron");
+        if let Ok(text) = std::fs::read_to_string(&places) {
+            match ron::from_str(&text) {
+                Ok(places) => report.hud_icon_places.push(places),
+                Err(e) => report
+                    .warnings
+                    .push(format!("{}: {e}", places.display())),
             }
         }
 

@@ -768,6 +768,10 @@ fn build_hud(
     ui::hud::add_leaving_line(&mut layout);
     ui::hud::add_spectate_lines(&mut layout);
     let mut hud = Hud::new(&layout, transforms);
+    // A mod's own INGAME.LVL places its weapon models in the weapon rows.
+    for places in crate::mods_runtime::active_hud_icon_places() {
+        hud.add_mesh_places(&places);
+    }
     if let Some(addon) = addon {
         let first = hud.elems.len();
         hud.append_addon(addon);

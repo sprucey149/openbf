@@ -783,6 +783,25 @@ fn position(n: &HudNode) -> Vec3 {
     Vec3::new(x, y, v.z)
 }
 
+/// A `MeshInfo` record: the pose a model takes in place of its element's.
+fn mesh_info(n: &HudNode) -> MeshInfo {
+    let mut info = MeshInfo {
+        mesh: text(n, 0).unwrap_or_default().to_ascii_lowercase(),
+        pos: Vec3::ZERO,
+        rot: Vec3::ZERO,
+        scale: Vec3::ONE,
+    };
+    for p in &n.children {
+        match p.name.to_ascii_lowercase().as_str() {
+            "position" => info.pos = position(p),
+            "rotation" => info.rot = vec3(p),
+            "scale" => info.scale = vec3(p),
+            _ => {}
+        }
+    }
+    info
+}
+
 fn rect(n: &HudNode) -> Rect {
     let (w, h) = to_pixels(
         num(n, 0).unwrap_or(0.0),
@@ -948,6 +967,26 @@ impl Hud {
         }
     }
 
+    /// Take from `places` (a mod's own layout, cut down to elements and their
+    /// `MeshInfo` records) the models the same elements here do not place.
+    /// The layout's own record for a model stays.
+    pub fn add_mesh_places(&mut self, places: &HudLayout) {
+        for n in &places.nodes {
+            let Some(i) = text(n, 0).and_then(|name| self.find(name)) else {
+                continue;
+            };
+            for c in &n.children {
+                if !c.name.eq_ignore_ascii_case("meshinfo") {
+                    continue;
+                }
+                let info = mesh_info(c);
+                if !self.elems[i].mesh_info.iter().any(|k| k.mesh == info.mesh) {
+                    self.elems[i].mesh_info.push(info);
+                }
+            }
+        }
+    }
+
     fn mark_anchor(&mut self, i: usize, a: crate::hud_draw::VAnchor) {
         self.v_anchors[i] = a;
         for k in 0..self.elems[i].children.len() {
@@ -1049,21 +1088,7 @@ impl Hud {
                     continue;
                 }
                 if lname == "meshinfo" {
-                    let mut info = MeshInfo {
-                        mesh: text(c, 0).unwrap_or_default().to_ascii_lowercase(),
-                        pos: Vec3::ZERO,
-                        rot: Vec3::ZERO,
-                        scale: Vec3::ONE,
-                    };
-                    for p in &c.children {
-                        match p.name.to_ascii_lowercase().as_str() {
-                            "position" => info.pos = position(p),
-                            "rotation" => info.rot = vec3(p),
-                            "scale" => info.scale = vec3(p),
-                            _ => {}
-                        }
-                    }
-                    self.elems[i].mesh_info.push(info);
+                    self.elems[i].mesh_info.push(mesh_info(c));
                     continue;
                 }
                 if lname == "format" && kind == Kind::MultiLineText {

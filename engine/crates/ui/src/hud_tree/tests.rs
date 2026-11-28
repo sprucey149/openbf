@@ -591,3 +591,47 @@ fn a_side_hud_answers_last_and_follows_the_weapon_slot() {
     );
     assert!((hud.elems[extra].mesh_info[0].pos - want).length() < 1e-3);
 }
+
+/// A mod's INGAME.LVL places a model the loaded layout does not; its record
+/// for a model the layout already places changes nothing.
+#[test]
+fn a_mods_mesh_places_fill_only_the_models_the_layout_lacks() {
+    let s = |v: &str| HudArg::Str(v.into());
+    let n = HudArg::Num;
+    let info = |mesh: &str, x: f32| {
+        node(
+            "meshinfo",
+            &[s(mesh)],
+            vec![node("position", &[n(x), n(0.0), n(0.0), s("Viewport")], vec![])],
+        )
+    };
+    let row = |name: &str, infos: Vec<HudNode>| node("model3d", &[s(name)], infos);
+    let layout = HudLayout {
+        name: "1playerhud".into(),
+        nodes: vec![row("player1weapon1mesh", vec![info("rifle", -0.25)])],
+    };
+    let none = HudLayout {
+        name: "hudtransforms".into(),
+        nodes: vec![],
+    };
+    let mut hud = Hud::new(&layout, &none);
+    hud.add_mesh_places(&HudLayout {
+        name: "1playerhud".into(),
+        nodes: vec![
+            row(
+                "player1weapon1mesh",
+                vec![info("Rifle", 0.5), info("flechette", -0.5)],
+            ),
+            row("no_such_element", vec![info("pistol", 0.1)]),
+        ],
+    });
+    let placed: Vec<(&str, f32)> = hud.elems[hud.find("player1weapon1mesh").unwrap()]
+        .mesh_info
+        .iter()
+        .map(|m| (m.mesh.as_str(), m.pos.x))
+        .collect();
+    assert_eq!(
+        placed,
+        [("rifle", -0.25 * FRAME_W), ("flechette", -0.5 * FRAME_W)]
+    );
+}

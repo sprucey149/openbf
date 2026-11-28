@@ -48,6 +48,64 @@ fn progress(emit: bool, pct: u8, msg: &str) {
     }
 }
 
+/// Whether `rel` is the mod's copy of the game's own INGAME.LVL, which holds
+/// the whole HUD (an addon map's `dc:ingame.lvl` is not).
+fn is_global_ingame(rel: &str) -> bool {
+    let rel = rel.replace('\\', "/").to_ascii_lowercase();
+    rel.ends_with("data/_lvl_pc/ingame.lvl") && !rel.contains("addon/")
+}
+
+/// Where a mod's INGAME.LVL places weapon models in the one-player HUD's two
+/// weapon rows: its `1playerhud` elements of those names with only their
+/// `MeshInfo` records. The game adds the models its own layout does not
+/// place; without a row's record a model draws at the row's default pose, a
+/// third of the size and beside the row. `None` when the LVL has no such
+/// layout.
+fn weapon_icon_places(lvl: &[u8]) -> Result<Option<manifest::hud::HudLayout>> {
+    use manifest::hud::{HudArg, HudLayout, HudNode};
+    use mungefs::config::ConfigNode;
+    fn node(n: &ConfigNode) -> HudNode {
+        HudNode {
+            name: mungefs::hud::name(n.hash)
+                .map_or_else(|| format!("#{:08x}", n.hash), str::to_owned),
+            args: (0..n.values.len())
+                .map(|i| match n.str_arg(i) {
+                    Some(s) => HudArg::Str(s.to_owned()),
+                    None => HudArg::Num(f32::from_bits(n.values[i])),
+                })
+                .collect(),
+            children: n.children.iter().map(node).collect(),
+        }
+    }
+    fn rows(nodes: Vec<HudNode>, out: &mut Vec<HudNode>) {
+        for mut n in nodes {
+            let row = matches!(n.args.first(), Some(HudArg::Str(s))
+                if s.eq_ignore_ascii_case("player1weapon1mesh")
+                    || s.eq_ignore_ascii_case("player1weapon2mesh"));
+            if row && n.name.eq_ignore_ascii_case("model3d") {
+                n.children
+                    .retain(|c| c.name.eq_ignore_ascii_case("meshinfo"));
+                out.push(n);
+            } else {
+                rows(n.children, out);
+            }
+        }
+    }
+    let inner = mungefs::open(lvl).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let content = mungefs::content_chunks(inner).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut found = Vec::new();
+    for c in content.iter().filter(|c| &c.tag == b"hud_") {
+        let layout = mungefs::hud::parse(c).map_err(|e| anyhow::anyhow!("hud_: {e}"))?;
+        if layout.file_name() == Some("1playerhud") {
+            rows(layout.nodes.iter().map(node).collect(), &mut found);
+        }
+    }
+    Ok((!found.is_empty()).then(|| HudLayout {
+        name: "1playerhud".into(),
+        nodes: found,
+    }))
+}
+
 /// The lines of a mod's CORE.LVL table the mod itself wrote. OURS: a map
 /// mod ships the whole stock PC table beside its own `level.<map>.*` lines
 /// (ABR and KTH: key 1202146172, "INSTANT ACTION"), and laid over the
@@ -377,6 +435,23 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     }
 
     let _ = std::fs::remove_dir_all(staging.join(STOCK_SCRATCH));
+
+    let ingame = insp
+        .stock_override_lvls
+        .iter()
+        .find(|o| is_global_ingame(&o.rel_path));
+    if let Some(ingame) = ingame {
+        match std::fs::read(&ingame.abs_path)
+            .map_err(anyhow::Error::from)
+            .and_then(|lvl| weapon_icon_places(&lvl))
+        {
+            Ok(Some(places)) => {
+                crate::write_ron(&staging.join("hud").join("weapon_icons.ron"), &places)?;
+            }
+            Ok(None) => {}
+            Err(e) => warnings.push(format!("{}: weapon icon places: {e:#}", ingame.rel_path)),
+        }
+    }
 
     // The units of the maps' own SIDE LVLs, once every map is known, so that
     // a side many maps read is converted once.
